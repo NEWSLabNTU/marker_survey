@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>marker_survey_web</name>
+  <version>0.1.0</version>
+  <description>The browser interface for a site survey. Placeholder (phase 5).</description>
+  <maintainer email="noreply@example.com">marker_survey maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>marker_survey marker_localizer</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

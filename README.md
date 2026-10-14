@@ -18,8 +18,140 @@ Both share the detection, the survey (a bundle adjustment of every marker
 and camera pose), the marker map file and the localizer core. A robot adds
 only its launch file and the remapping into its own state estimator.
 
-Status: planning. See [ROADMAP.md](ROADMAP.md) and the phase documents in
-[docs/roadmap/](docs/roadmap/).
+Status: phase 0 of [ROADMAP.md](ROADMAP.md) is done (the survey, its tools
+and CI); the marker map file and the ceiling survey (phases 1 and 2) are in
+progress, the localizer and the web interface come after.
+
+## Packages
+
+| Package | Contents |
+|---|---|
+| `marker_survey` | `marker_survey.core` (detection, SE(3), the survey and its bundle adjustment, frames, the map file, the report, simulation and rendering; plain Python, no ROS), the survey node, command-line tools |
+| `marker_localizer` | placeholder for the localizer (phase 3) |
+| `marker_survey_web` | placeholder for the browser interface (phase 5) |
+
+## Install
+
+In a ROS 2 Humble or Jazzy workspace, with this repository under `src/`:
+
+```bash
+rosdep install --from-paths src --ignore-src -y
+colcon build
+source install/setup.bash
+```
+
+Dependencies: numpy, scipy, OpenCV (`python3-opencv`, 4.5 to 4.10), PyYAML,
+rclpy; `rosbag2_py` for the synthetic recording. The core modules import no
+ROS package: with `src/marker_survey/marker_survey` on `PYTHONPATH` they run
+in tests, notebooks and offline tools.
+
+## Quick start without a robot
+
+Render a recording of the example wall course, play it through the survey
+node, and compare the result with the truth:
+
+```bash
+ros2 run marker_survey marker_survey_synthetic /tmp/demo \
+    --map examples/sites/test_course/marker_map.yaml \
+    --route examples/sites/test_course/route.csv --camera forward --origin 10 --sweeps 4
+
+ros2 launch marker_survey survey.launch.xml output_dir:=/tmp/demo/result \
+    dictionary:=DICT_5X5_1000 marker_size:=0.38 origin_marker:=10 use_sim_time:=true &
+ros2 bag play /tmp/demo/bag --clock
+ros2 service call /marker_survey/save std_srvs/srv/Trigger
+
+ros2 run marker_survey marker_survey_compare /tmp/demo/result/marker_map.yaml /tmp/demo/truth_origin.yaml
+```
+
+`ci/synthetic_survey.sh wall` does all of this in one go.
+
+## Surveying a site
+
+1. Print the markers; measure the edge of the black square (`marker_size`),
+   not the sheet. A wrong size scales every distance.
+2. Start the robot's camera driver, its pose source and its TF, then the
+   survey (`examples/launch/` has a wall-board and a ceiling setup):
+
+   ```bash
+   ros2 launch marker_survey survey.launch.xml output_dir:=$PWD/my_site \
+       dictionary:=DICT_5X5_1000 marker_size:=0.38 origin_marker:=10
+   ```
+
+3. Drive slowly past every marker, from two or three places each; the log
+   names every new marker, and `~/debug/image` shows the detections (green
+   known, yellow new, red not used).
+4. Ctrl-C, or `ros2 service call /marker_survey/save std_srvs/srv/Trigger`.
+   The node writes to `output_dir`:
+   - `marker_map.yaml`: the markers (below);
+   - `survey_report.yaml`: per marker the views, reprojection RMS, 1-sigma
+     position, height and angle, flags and a verdict (`good`, `pass again`,
+     `bad`);
+   - `survey_data.npz`: the recording, to solve again without the robot:
+     `marker_survey_solve my_site/survey_data.npz --output-dir my_site`.
+
+The image may be rectified, or raw with distortion coefficients in its
+camera_info (the corners are then undistorted).
+
+### Frame and pose source
+
+`frame.mode: origin_marker` puts the origin on the floor below a chosen
+marker (`frame.origin_marker`), x the way it faces, z up (the floor normal,
+from the `base_frame` poses).
+
+- `pose_source: odometry`: a `nav_msgs/Odometry` topic (`odom_topic`):
+  visual-inertial, wheel or IMU odometry; `odom_drift` is its translation
+  error per metre.
+- `pose_source: tf`: TF `pose_frame -> camera optical frame`.
+
+## The marker map file
+
+One file per site, `marker_map.yaml`, written by the survey, editable by
+hand, read by robots as it is:
+
+```yaml
+# Boards around the test course.
+version: 1
+frame_id: map                 # the frame the robot's map uses
+dictionary: DICT_5X5_1000     # printed family
+marker_size: 0.38             # [m] edge of the black square, measured
+mount: wall                   # default for every marker below
+markers:
+  - {id: 10, x: 0.000, y: 0.000, z: 0.250, facing_deg:   0.0}               # origin
+  - {id: 11, x: 6.800, y: 1.950, z: 0.248, facing_deg: 180.0, lean_deg: 2.1}
+```
+
+`marker_survey/marker_survey/core/marker_map.py` defines the format and
+[docs/roadmap/phase-1-marker-map.md](docs/roadmap/phase-1-marker-map.md)
+the reasons behind it.
+
+## Tools
+
+| Command | Does |
+|---|---|
+| `marker_survey` (node) | the survey |
+| `marker_survey_solve` | solve a recording again, other frame or settings |
+| `marker_survey_synthetic` | render a recording from a marker map and a route CSV |
+| `marker_survey_compare` | a surveyed map against the truth or a tape survey |
+| `marker_map_check` | validate a map, draw it from above |
+| `marker_plan` | ceiling marker size and spacing from the ceiling height and camera |
+
+## Accuracy
+
+| Test | Marker position (3D) |
+|---|---|
+| wall course, rendered recording through the node (11 boards of 0.38 m, forward camera 960 x 600, one lap at 3 Hz, odometry drift 1 %) | median 0.8 cm, max 1.4 cm (Humble and Jazzy) |
+| the same course, corner-level simulation, 0.48 m boards, 1920 x 1200, two laps | median 0.4 cm, max 0.5 cm |
+
+## Development
+
+```bash
+colcon test --packages-select marker_survey && colcon test-result --verbose
+ci/synthetic_survey.sh wall          # in a sourced workspace
+python3 ci/check_words.py --commits  # neutral wording
+```
+
+CI (GitHub Actions) builds and tests on `ros:humble` and `ros:jazzy`, runs
+the rendered survey through the node, and checks the wording.
 
 ## Licence
 

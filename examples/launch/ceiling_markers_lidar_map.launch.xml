@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!--
+  Example: ceiling markers seen by an indoor robot's upward camera, surveyed
+  into the frame of the robot's LiDAR map, so that places, zones and docks
+  drawn on that map agree with the markers. The robot's own launch runs the
+  camera driver, the wheel odometry (TF odom -> base_link) and the LiDAR
+  localizer (TF map -> odom). Then:
+
+    ros2 launch examples/launch/ceiling_markers_lidar_map.launch.xml output_dir:=$PWD/my_site
+
+  frame_mode align_to_track (the default here) surveys in odom and fits the
+  whole trajectory to the localizer's once; pose_frame uses the localizer's
+  map pose for every keyframe instead.
+-->
+<launch>
+  <arg name="output_dir"/>
+  <arg name="frame_mode" default="align_to_track" description="align_to_track or pose_frame"/>
+  <arg name="dictionary" default="tag36h11"/>
+  <arg name="marker_size" default="0.45" description="[m] edge of the black square, measured"/>
+  <arg name="image_topic" default="/ceiling_camera/image_raw"/>
+  <arg name="camera_info_topic" default="/ceiling_camera/camera_info"/>
+  <arg name="pose_frame" default="odom" description="pose_frame mode: set map"/>
+
+  <include file="$(find-pkg-share marker_survey)/launch/survey.launch.xml">
+    <arg name="output_dir" value="$(var output_dir)"/>
+    <arg name="dictionary" value="$(var dictionary)"/>
+    <arg name="marker_size" value="$(var marker_size)"/>
+    <arg name="frame_mode" value="$(var frame_mode)"/>
+    <arg name="reference_frame" value="map"/>
+    <arg name="pose_source" value="tf"/>
+    <arg name="pose_frame" value="$(var pose_frame)"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+  </include>
+</launch>

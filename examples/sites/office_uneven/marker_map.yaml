@@ -1,0 +1,17 @@
+# The office with an uneven ceiling: heights from 2.8 to 3.4 m and two
+# tilted markers.
+version: 1
+frame_id: map                 # the frame the robot's map uses
+dictionary: tag36h11          # printed family
+marker_size: 0.45             # [m] edge of the black square, measured
+mount: ceiling                # default for every marker below
+markers:
+  - {id: 0, x: -4.000, y:  1.500, z: 2.850, rotation_deg:   0.0}
+  - {id: 1, x: -1.500, y:  1.500, z: 3.100, rotation_deg:  45.8}
+  - {id: 2, x:  1.500, y:  2.500, z: 3.350, rotation_deg:   0.0}
+  - {id: 3, x:  4.000, y:  1.000, z: 2.950, rotation_deg: -34.4}                     # on a sloped panel
+  - {id: 4, x:  3.000, y: -2.000, z: 3.200, rotation_deg:  91.7, tilt_x_deg: 6.0}
+  - {id: 5, x:  0.000, y: -0.500, z: 3.020, rotation_deg:   0.0}
+  - {id: 6, x: -1.000, y: -3.000, z: 2.800, rotation_deg: -68.8}
+  - {id: 7, x: -3.500, y: -1.500, z: 3.400, rotation_deg:  22.9, tilt_y_deg: -4.0}   # under a duct, hung at an angle
+  - {id: 8, x:  0.300, y:  3.000, z: 3.150, rotation_deg:  17.2}

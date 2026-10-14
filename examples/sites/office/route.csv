@@ -1,0 +1,11 @@
+# Routes through the office, driven as one closed loop: along the north
+# side, back through the middle, along the south side, and up the west end.
+# x [m], y [m]
+-4.5,2.0
+4.5,2.0
+4.5,0.0
+-4.5,0.0
+-4.5,-2.0
+4.5,-2.0
+4.5,-3.0
+-4.5,-3.0

@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<!--
+  The marker survey node alone. The camera driver, the pose source and the
+  robot's TF (base_frame to the camera) come from the robot's own launch
+  files; examples/ shows two setups.
+
+    ros2 launch marker_survey survey.launch.xml output_dir:=$PWD/site \
+        dictionary:=DICT_5X5_1000 marker_size:=0.38 frame_mode:=origin_marker origin_marker:=10
+
+  For a recorded bag: use_sim_time:=true, then ros2 bag play BAG clock.
+  Save with Ctrl-C or: ros2 service call /marker_survey/save std_srvs/srv/Trigger
+-->
+<launch>
+  <arg name="output_dir" description="where marker_map.yaml, survey_report.yaml and survey_data.npz are written"/>
+  <arg name="dictionary" default="DICT_5X5_1000" description="the printed family: an OpenCV DICT_* name or tag36h11, tag25h9, ..."/>
+  <arg name="marker_size" default="0.38" description="[m] edge of the BLACK SQUARE, not of the sheet: measure it"/>
+  <arg name="frame_mode" default="origin_marker" description="origin_marker, pose_frame or align_to_track"/>
+  <arg name="origin_marker" default="-1" description="origin_marker mode: the marker that defines the frame"/>
+  <arg name="frame_id" default="map" description="origin_marker mode: the frame name written to the map"/>
+  <arg name="reference_frame" default="map" description="align_to_track: TF frame of the reference trajectory"/>
+  <arg name="pose_source" default="odometry" description="odometry (nav_msgs/Odometry) or tf"/>
+  <arg name="odom_topic" default="/odom"/>
+  <arg name="pose_frame" default="" description="pose_source tf: the frame of the camera poses (map, odom, ...)"/>
+  <arg name="base_frame" default="base_link"/>
+  <arg name="image_topic" default="/camera/image"/>
+  <arg name="camera_info_topic" default="/camera/camera_info"/>
+  <arg name="compressed" default="false"/>
+  <arg name="floor_offset" default="0.0" description="[m] how far the floor lies below base_frame (a vehicle on a stand)"/>
+  <arg name="pose_sd" default="0.05" description="pose_frame: [m] noise of the pose source per axis"/>
+  <arg name="use_sim_time" default="false"/>
+
+  <node pkg="marker_survey" exec="marker_survey" name="marker_survey" output="screen">
+    <param name="output_dir" value="$(var output_dir)"/>
+    <param name="dictionary" value="$(var dictionary)"/>
+    <param name="marker_size" value="$(var marker_size)"/>
+    <param name="frame.mode" value="$(var frame_mode)"/>
+    <param name="frame.origin_marker" value="$(var origin_marker)"/>
+    <param name="frame.frame_id" value="$(var frame_id)"/>
+    <param name="frame.reference_frame" value="$(var reference_frame)"/>
+    <param name="pose_source" value="$(var pose_source)"/>
+    <param name="odom_topic" value="$(var odom_topic)"/>
+    <param name="pose_frame" value="$(var pose_frame)"/>
+    <param name="base_frame" value="$(var base_frame)"/>
+    <param name="image_topic" value="$(var image_topic)"/>
+    <param name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <param name="compressed" value="$(var compressed)"/>
+    <param name="floor_offset" value="$(var floor_offset)"/>
+    <param name="pose_sd" value="$(var pose_sd)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+</launch>

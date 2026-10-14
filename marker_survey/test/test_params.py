@@ -1,0 +1,65 @@
+import math
+
+import pytest
+
+from marker_survey.params import PARAMETERS, SurveyParams, parse_sizes
+
+
+def params(**over):
+    p = dict(PARAMETERS)
+    p.update({'output_dir': '/tmp/site', 'frame.origin_marker': 10})
+    p.update(over)
+    return SurveyParams(lambda k: p[k])
+
+
+def test_defaults_survey_in_the_frame_of_an_origin_marker():
+    p = params()
+    assert p.frame.mode == 'origin_marker' and p.frame.origin_marker == 10
+    assert p.pose_source == 'odometry'
+    assert p.settings.motion_factors and not p.settings.pose_priors
+    assert p.settings.keyframe_angle == pytest.approx(math.radians(5.0))
+    assert p.frame.frame_id == 'map'
+
+
+def test_output_dir_and_origin_are_required():
+    with pytest.raises(ValueError, match='output_dir'):
+        params(output_dir='')
+    with pytest.raises(ValueError, match='origin_marker'):
+        params(**{'frame.origin_marker': -1})
+
+
+def test_pose_frame_uses_priors_and_the_pose_frame_name():
+    p = params(**{'frame.mode': 'pose_frame', 'pose_source': 'tf', 'pose_frame': 'map',
+                  'pose_sd': 0.06})
+    assert p.settings.pose_priors and not p.settings.motion_factors
+    assert p.settings.pose_sd == 0.06
+    assert p.frame.frame_id == 'map' and p.frame.origin_marker is None
+
+
+def test_align_to_track_needs_a_reference_frame():
+    with pytest.raises(ValueError, match='reference_frame'):
+        params(**{'frame.mode': 'align_to_track'})
+    p = params(**{'frame.mode': 'align_to_track', 'frame.reference_frame': 'map'})
+    assert p.frame.frame_id == 'map' and p.settings.motion_factors
+
+
+def test_bad_values_are_refused():
+    with pytest.raises(ValueError, match='frame.mode'):
+        params(**{'frame.mode': 'nowhere'})
+    with pytest.raises(ValueError, match='pose_source'):
+        params(pose_source='gps')
+    with pytest.raises(ValueError, match='pose_frame'):
+        params(pose_source='tf')
+    with pytest.raises(ValueError, match='marker_size'):
+        params(marker_size=0.0)
+    with pytest.raises(ValueError, match='ID:SIZE'):
+        params(marker_sizes=['12=0.3'])
+
+
+def test_odom_is_an_alias_of_odometry():
+    assert params(pose_source='odom').pose_source == 'odometry'
+
+
+def test_marker_sizes():
+    assert parse_sizes(['12:0.30', ' ', '7:0.2']) == {12: 0.30, 7: 0.2}
+    assert params(marker_sizes=['12:0.30']).settings.size_of(12) == 0.30

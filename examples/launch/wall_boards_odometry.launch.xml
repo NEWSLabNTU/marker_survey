@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!--
+  Example: wall boards seen by a vehicle's forward camera whose driver also
+  publishes visual-inertial odometry. The driver and the vehicle's TF
+  (base_link to the camera) are the robot's own; start them first, then:
+
+    ros2 launch examples/launch/wall_boards_odometry.launch.xml output_dir:=$PWD/my_site origin_marker:=10
+
+  Driver settings that matter for a survey: a rectified image (camera_info
+  without distortion), odometry that never resets or jumps (no loop closure,
+  no relocalisation), and the odometry's TF publishing off if the vehicle's
+  URDF already places the camera.
+-->
+<launch>
+  <arg name="output_dir"/>
+  <arg name="origin_marker" description="the board that defines the frame"/>
+  <arg name="dictionary" default="DICT_5X5_1000"/>
+  <arg name="marker_size" default="0.38" description="[m] edge of the black square, measured"/>
+  <arg name="image_topic" default="/camera/image_rect"/>
+  <arg name="camera_info_topic" default="/camera/camera_info"/>
+  <arg name="odom_topic" default="/camera/odom"/>
+
+  <include file="$(find-pkg-share marker_survey)/launch/survey.launch.xml">
+    <arg name="output_dir" value="$(var output_dir)"/>
+    <arg name="dictionary" value="$(var dictionary)"/>
+    <arg name="marker_size" value="$(var marker_size)"/>
+    <arg name="frame_mode" value="origin_marker"/>
+    <arg name="origin_marker" value="$(var origin_marker)"/>
+    <arg name="pose_source" value="odometry"/>
+    <arg name="odom_topic" value="$(var odom_topic)"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+  </include>
+</launch>
