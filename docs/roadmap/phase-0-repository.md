@@ -94,7 +94,8 @@ survey node:
 Corner-level simulation of the same course with the source's settings
 (0.48 m boards, 1920 x 1200, two laps): median 0.35 cm, max 0.54 cm
 (source: 1.0 cm, 4.0 cm). The CI gate is the phase's target, median
-3 cm and max 4.5 cm.
+3 cm and max 4.5 cm; the first green run on GitHub (38656738735) measured
+median 0.80 cm, max 1.36 cm on both distros.
 
 ### What changed on the way, and why
 

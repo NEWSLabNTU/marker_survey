@@ -61,14 +61,14 @@ the survey use only the matrix. Missing angles are zero.
 
 ## Tasks
 
-- [ ] `core/marker_map.py`: load, validate (errors with line and field),
+- [x] `core/marker_map.py`: load, validate (errors with line and field),
       write (aligned flow style, comments round-trip with ruamel.yaml), the
       mount conventions and their matrices
-- [ ] JSON Schema for editors (`marker_map.schema.json`)
-- [ ] `marker_map_check` tool: loads, validates, prints a top-down plot
-- [ ] Importers for the two source formats (one-off migration of existing
+- [x] JSON Schema for editors (`marker_map.schema.json`)
+- [x] `marker_map_check` tool: loads, validates, prints a top-down plot
+- [x] Importers for the two source formats (one-off migration of existing
       sites; not used at run time)
-- [ ] Unit tests: each mount's reference orientation, round trip of values
+- [x] Unit tests: each mount's reference orientation, round trip of values
       and comments, error messages
 
 ## Done when
@@ -76,3 +76,52 @@ the survey use only the matrix. Missing angles are zero.
 The two existing sites (a wall course of 11 boards, an office of 9 ceiling
 markers) import, write and load back to the same marker poses within 1e-6,
 with comments kept.
+
+## Result
+
+Done. `test/test_importers.py` imports both sites from fixtures holding
+their marker poses (the course format for the 11 wall boards, the ceiling
+list for the 9 office markers), writes `marker_map.yaml`, loads it back and
+compares every pose with the source format's own convention: largest
+difference 8e-9 (wall course) and 7e-9 (office), every comment kept, and a
+second write is byte-identical. The survey writes `marker_map.yaml`,
+`survey_report.yaml` and `survey_data.npz`; a new survey keeps the comments
+of the old map for the same marker ids.
+
+Pieces:
+
+- `core/marker_map.py`: `load`, `loads`, `dumps`, `write`, the model
+  (`MarkerMap`, `MapMarker`), `mount_rotation` and its inverse
+  `angles_from_rotation`, `mount_from_normal`, `tilt_from_mount`;
+- `schema/marker_map.schema.json` (installed to `share/marker_survey/schema`);
+- `marker_map_check MAP [--png top.png]`: summary, warnings (tilted more
+  than 10 degrees, overlapping markers), a top view in the terminal and
+  optionally as an image;
+- `core/importers.py` and `marker_map_import {course,ceiling-list} SRC OUT`,
+  which also reports the largest pose difference from the source.
+
+### Deviations, and why
+
+- **Ceiling and floor reference.** The plan said "facing down, top towards
+  +x". The existing ceiling sites define a marker's rotation with its image
+  x axis along +x (and so its top towards -y), and this document's own
+  example (`rotation_deg: 45.8` for a rotation of 0.8 rad) needs that
+  convention, so the reference is "facing down, image x axis along +x". The
+  floor follows suit: facing up, image x axis along +x (top towards +y).
+  Angles are composed as `Rz(rotation) Rx(tilt_x) Ry(tilt_y) R_ref`, and for
+  walls `Rz(facing) Ry(-lean) Rx(turn) R_ref`, which reproduces the course
+  format's yaw, pitch and roll exactly.
+- **Comments without ruamel.yaml.** The loader reads values with PyYAML and
+  records where each key and marker was read; comments are collected from
+  the lines (the header, a comment after a top-level key, comment lines
+  above a marker, the comment at the end of a marker's line, a footer) and
+  written back in place. This keeps the column alignment fully under the
+  writer's control and adds no dependency.
+- **Precision.** Values are written with as many decimals as they need, up
+  to 6, and padded to a common number per column; a survey rounds to
+  1 mm and 0.01 degree first, an import keeps full precision
+  (`facing_deg: 180.000421` for 3.1416 rad), which is what keeps the round
+  trip within 1e-6.
+- A marker may carry its own `mount:` when it differs from the map's
+  default; unknown keys are errors (a typo such as `sise:` would otherwise
+  be silently ignored); `frame_id` defaults to `map`.

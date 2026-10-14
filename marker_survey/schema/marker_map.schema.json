@@ -1,0 +1,306 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "marker_map.schema.json",
+  "title": "marker_map.yaml, version 1",
+  "description": "Fiducial markers of one site. Metres and degrees; orientation relative to the mount (wall, ceiling, floor). marker_survey/core/marker_map.py is the reference.",
+  "type": "object",
+  "required": [
+    "version",
+    "dictionary",
+    "marker_size",
+    "markers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "frame_id": {
+      "type": "string",
+      "minLength": 1,
+      "default": "map",
+      "description": "the frame the robot's map uses"
+    },
+    "dictionary": {
+      "type": "string",
+      "description": "printed family: an OpenCV DICT_* name, or tag16h5, tag25h9, tag36h10, tag36h11, aruco_mip_36h12, aruco_original"
+    },
+    "marker_size": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "[m] edge of the black square, measured"
+    },
+    "mount": {
+      "enum": [
+        "wall",
+        "ceiling",
+        "floor"
+      ],
+      "description": "default mount of the markers"
+    },
+    "markers": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "x",
+          "y",
+          "z"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "marker ID in the dictionary"
+          },
+          "x": {
+            "type": "number",
+            "description": "[m] centre, map frame"
+          },
+          "y": {
+            "type": "number",
+            "description": "[m]"
+          },
+          "z": {
+            "type": "number",
+            "description": "[m]"
+          },
+          "mount": {
+            "enum": [
+              "wall",
+              "ceiling",
+              "floor"
+            ],
+            "description": "overrides the map's default mount"
+          },
+          "size": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "[m] edge of the black square, if different from marker_size"
+          },
+          "facing_deg": {
+            "type": "number",
+            "description": "wall: direction it faces, about z, counter-clockwise from +x"
+          },
+          "lean_deg": {
+            "type": "number",
+            "description": "wall: top leaning back, away from the viewer"
+          },
+          "turn_deg": {
+            "type": "number",
+            "description": "wall: turned in its own plane, counter-clockwise from the front"
+          },
+          "rotation_deg": {
+            "type": "number",
+            "description": "ceiling, floor: about z, counter-clockwise from above; 0 = image x axis along +x"
+          },
+          "tilt_x_deg": {
+            "type": "number",
+            "description": "ceiling, floor: small tilt about x after the rotation"
+          },
+          "tilt_y_deg": {
+            "type": "number",
+            "description": "ceiling, floor: small tilt about y after the rotation"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "mount"
+              ],
+              "properties": {
+                "mount": {
+                  "const": "wall"
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "rotation_deg"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "tilt_x_deg"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "tilt_y_deg"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "mount"
+              ],
+              "properties": {
+                "mount": {
+                  "enum": [
+                    "ceiling",
+                    "floor"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "facing_deg"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lean_deg"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "turn_deg"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "mount"
+        ],
+        "properties": {
+          "mount": {
+            "const": "wall"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "markers": {
+            "items": {
+              "if": {
+                "not": {
+                  "required": [
+                    "mount"
+                  ]
+                }
+              },
+              "then": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "rotation_deg"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "tilt_x_deg"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "tilt_y_deg"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "mount"
+        ],
+        "properties": {
+          "mount": {
+            "enum": [
+              "ceiling",
+              "floor"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "markers": {
+            "items": {
+              "if": {
+                "not": {
+                  "required": [
+                    "mount"
+                  ]
+                }
+              },
+              "then": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "facing_deg"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "lean_deg"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "turn_deg"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "required": [
+            "mount"
+          ]
+        }
+      },
+      "then": {
+        "properties": {
+          "markers": {
+            "items": {
+              "required": [
+                "mount"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

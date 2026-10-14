@@ -1,0 +1,16 @@
+# Ceiling markers of the office, in the map frame (ceiling list format).
+# Fixture for the importer.
+#   id: marker ID; x, y, z: marker centre (m); yaw: marker rotation (rad)
+family: tag36h11
+marker_size: 0.45
+markers:
+- {id: 0, x: -4.0, y: 1.5, z: 3.0, yaw: 0.0}
+- {id: 1, x: -1.5, y: 1.5, z: 3.0, yaw: 0.8}
+- {id: 2, x: 1.5, y: 2.5, z: 3.0, yaw: 0.0}
+- {id: 3, x: 4.0, y: 1.0, z: 3.0, yaw: -0.6}    # above the printer
+- {id: 4, x: 3.0, y: -2.0, z: 3.0, yaw: 1.6}
+- {id: 5, x: 0.0, y: -0.5, z: 3.0, yaw: 0.0}
+- {id: 6, x: -1.0, y: -3.0, z: 3.0, yaw: -1.2}
+- {id: 7, x: -3.5, y: -1.5, z: 3.0, yaw: 0.4}
+# by the door
+- {id: 8, x: 0.3, y: 3.0, z: 3.0, yaw: 0.3}

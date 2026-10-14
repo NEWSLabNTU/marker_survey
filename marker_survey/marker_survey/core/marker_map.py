@@ -260,7 +260,9 @@ def _is_comment_line(line: str) -> bool:
 
 
 def _comment_text(line: str) -> str:
-    return line.strip()[1:].strip()
+    """The text of a comment line: after the '#' and one space, indentation kept."""
+    t = line.strip()[1:]
+    return (t[1:] if t.startswith(' ') else t).rstrip()
 
 
 @dataclass
@@ -499,7 +501,7 @@ def dumps(mm: MarkerMap) -> str:
     ang_dec = max(_decimals_needed(v, 1) for v in prim_vals)
     id_w = max(len(str(m.id)) for m in ms)
     cols = {k: max(len(_fmt(getattr(m, k), pos_dec[k])) for m in ms) for k in ('x', 'y', 'z')}
-    prim_w = max(len(_fmt(v, ang_dec)) for v in prim_vals)
+    prim_w = max([len(_fmt(v, ang_dec)) for v in prim_vals] + [ang_dec + 4])   # room for 180.0
     prim_key_w = max(len(prim[m.id]) for m in ms)
     rows = []
     for m in ms:
@@ -519,11 +521,13 @@ def dumps(mm: MarkerMap) -> str:
         if m.size is not None and m.size != mm.marker_size:
             extra.append(f'size: {_fmt(m.size, _decimals_needed(m.size, 2))}')
         body = ' '.join(parts)
+        base = len('  - {' + body + '}')
         if extra:
             body += ', ' + ', '.join(extra)
-        rows.append((m, '  - {' + body + '}'))
-    width = max(len(r) for _, r in rows)
-    for m, r in rows:
+        rows.append((m, '  - {' + body + '}', base))
+    # trailing comments line up after the aligned columns; longer rows push theirs on
+    width = max(base for _, _, base in rows)
+    for m, r, _ in rows:
         for a in m.comment_above:
             out.append('  ' + _comment(a))
         if m.comment is not None:

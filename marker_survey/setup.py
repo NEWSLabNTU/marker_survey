@@ -29,6 +29,7 @@ setup(
             'marker_survey_synthetic = marker_survey.tools.synthetic:main',
             'marker_survey_compare = marker_survey.tools.compare:main',
             'marker_map_check = marker_survey.tools.map_check:main',
+            'marker_map_import = marker_survey.tools.map_import:main',
             'marker_plan = marker_survey.tools.plan:main',
         ],
     },

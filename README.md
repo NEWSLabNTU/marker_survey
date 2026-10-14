@@ -18,8 +18,8 @@ Both share the detection, the survey (a bundle adjustment of every marker
 and camera pose), the marker map file and the localizer core. A robot adds
 only its launch file and the remapping into its own state estimator.
 
-Status: phase 0 of [ROADMAP.md](ROADMAP.md) is done (the survey, its tools
-and CI); the marker map file and the ceiling survey (phases 1 and 2) are in
+Status: phases 0 and 1 of [ROADMAP.md](ROADMAP.md) are done (the survey,
+its tools and CI; the marker map file); the ceiling survey (phase 2) is in
 progress, the localizer and the web interface come after.
 
 ## Packages
@@ -87,7 +87,7 @@ ros2 run marker_survey marker_survey_compare /tmp/demo/result/marker_map.yaml /t
      position, height and angle, flags and a verdict (`good`, `pass again`,
      `bad`);
    - `survey_data.npz`: the recording, to solve again without the robot:
-     `marker_survey_solve my_site/survey_data.npz --output-dir my_site`.
+     `ros2 run marker_survey marker_survey_solve my_site/survey_data.npz --output-dir my_site`.
 
 The image may be rectified, or raw with distortion coefficients in its
 camera_info (the corners are then undistorted).
@@ -106,25 +106,57 @@ from the `base_frame` poses).
 ## The marker map file
 
 One file per site, `marker_map.yaml`, written by the survey, editable by
-hand, read by robots as it is:
+hand, read by robots as it is (no conversion step):
 
 ```yaml
-# Boards around the test course.
+# Ceiling markers of the warehouse, surveyed 2026-11-03.
 version: 1
 frame_id: map                 # the frame the robot's map uses
-dictionary: DICT_5X5_1000     # printed family
-marker_size: 0.38             # [m] edge of the black square, measured
-mount: wall                   # default for every marker below
+dictionary: tag36h11          # printed family
+marker_size: 0.45             # [m] edge of the black square, measured
+mount: ceiling                # default for every marker below
 markers:
-  - {id: 10, x: 0.000, y: 0.000, z: 0.250, facing_deg:   0.0}               # origin
-  - {id: 11, x: 6.800, y: 1.950, z: 0.248, facing_deg: 180.0, lean_deg: 2.1}
+  - {id: 0,  x: -4.000, y:  1.500, z: 3.012, rotation_deg:   0.0}
+  - {id: 7,  x:  3.000, y: -2.000, z: 3.204, rotation_deg:  91.7, tilt_x_deg: 1.2}   # under the duct
+  - {id: 12, x:  0.300, y:  3.000, z: 3.005, rotation_deg:  17.2, size: 0.30}
 ```
 
-`marker_survey/marker_survey/core/marker_map.py` defines the format and
-[docs/roadmap/phase-1-marker-map.md](docs/roadmap/phase-1-marker-map.md)
-the reasons behind it.
+Metres and degrees. A marker's orientation is given relative to its
+mounting, so a well-mounted marker has small numbers; missing angles are
+zero:
+
+| `mount` | Reference pose (all angles zero) | Angles |
+|---|---|---|
+| `wall` | upright, facing +x, top up | `facing_deg` (about z), `lean_deg` (top leaning back), `turn_deg` (in its own plane, counter-clockwise from the front) |
+| `ceiling` | facing down, the image's x axis along +x | `rotation_deg` (about z, counter-clockwise from above), `tilt_x_deg`, `tilt_y_deg` |
+| `floor` | facing up, the image's x axis along +x | `rotation_deg`, `tilt_x_deg`, `tilt_y_deg` |
+
+- `mount` at the top is the default; a marker may carry its own.
+- `size` on a marker overrides `marker_size` (sites mix sheet sizes).
+- Uncertainties and view counts are in `survey_report.yaml`, not here.
+- Comments survive a survey: a new survey keeps the header and the comments
+  of markers it finds again.
+- `dictionary`: an OpenCV name (`DICT_5X5_1000`, ...) or `tag16h5`,
+  `tag25h9`, `tag36h10`, `tag36h11`, `aruco_mip_36h12`, `aruco_original`.
+
+`marker_survey/marker_survey/core/marker_map.py` defines the rotation
+matrices; `marker_survey/schema/marker_map.schema.json` is a JSON Schema
+for editors. Errors name the line and the field:
+
+```
+$ ros2 run marker_survey marker_map_check site/marker_map.yaml
+ERROR: site/marker_map.yaml:9: marker 1: facing_deg is an angle of mount wall, not ceiling (use rotation_deg, tilt_x_deg, tilt_y_deg)
+```
+
+A valid map is summarised and drawn from above (`--png top.png` for an
+image). Existing sites in the two older formats (a course file of wall
+boards with yaw, pitch, roll in radians; a plain list of ceiling markers
+with x, y, z, yaw) convert once with
+`ros2 run marker_survey marker_map_import course ...` or `... ceiling-list ...`.
 
 ## Tools
+
+Each runs as `ros2 run marker_survey <command>`; `--help` lists the options.
 
 | Command | Does |
 |---|---|
@@ -133,6 +165,7 @@ the reasons behind it.
 | `marker_survey_synthetic` | render a recording from a marker map and a route CSV |
 | `marker_survey_compare` | a surveyed map against the truth or a tape survey |
 | `marker_map_check` | validate a map, draw it from above |
+| `marker_map_import` | convert an older site file into `marker_map.yaml` |
 | `marker_plan` | ceiling marker size and spacing from the ceiling height and camera |
 
 ## Accuracy

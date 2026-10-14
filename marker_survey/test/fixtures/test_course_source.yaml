@@ -1,0 +1,23 @@
+# Test course: a 10 m x 4 m oval with eleven boards on the walls around it,
+# in the course format (angles in radians). Fixture for the importer.
+#
+# Frame: origin at the start, x along the first straight, y to the left.
+# Boards face into the course; the side-wall ones are angled towards the
+# oncoming vehicle.
+marker_size: 0.25
+marker_height: 0.25
+markers:
+  # end walls, seen in the turns
+  - {id: 0, x: 10.0, y: 0.5, yaw: 3.1416}
+  - {id: 1, x: 10.0, y: 3.5, yaw: 3.1416}
+  - {id: 2, x: -4.0, y: 3.5, yaw: 0.0}
+  - {id: 3, x: -4.0, y: 0.5, yaw: 0.0}
+  # the y = -2 wall, angled towards a vehicle driving +x
+  - {id: 4, x: 2.0, y: -2.0, yaw: 2.3562}
+  - {id: 5, x: 5.0, y: -2.0, yaw: 2.3562}
+  - {id: 6, x: 8.0, y: -2.0, yaw: 2.0944}
+  - {id: 10, x: 4.0, y: -2.0, yaw: 2.3562}   # by the start
+  # the y = 6 wall, angled towards a vehicle driving -x
+  - {id: 7, x: 4.0, y: 6.0, yaw: -0.7854}
+  - {id: 8, x: 1.0, y: 6.0, yaw: -0.7854}
+  - {id: 9, x: -2.0, y: 6.0, yaw: -1.0472, z: 0.30, pitch: 0.035, roll: -0.02}   # higher, slightly tilted
