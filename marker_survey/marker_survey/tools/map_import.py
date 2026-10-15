@@ -4,6 +4,8 @@
     marker_map_import ceiling-list markers.yaml marker_map.yaml
 
 A one-off migration; core/importers.py describes the two source formats.
+Comments next to markers are copied; the source's header and footer
+comments only with --keep-header (otherwise one line names the source).
 The converted map is loaded back and compared with the source, pose by pose.
 """
 import argparse
@@ -22,14 +24,17 @@ def main(argv=None):
     ap.add_argument('output', help='marker_map.yaml to write')
     ap.add_argument('--dictionary', help='printed family, if the source does not name it')
     ap.add_argument('--frame-id', default='map')
+    ap.add_argument('--keep-header', action='store_true',
+                    help="also copy the source's header and footer comments")
     args = ap.parse_args(argv)
     with open(args.source) as f:
         text = f.read()
     try:
         if args.kind == 'course':
-            m = importers.from_course(text, args.source, args.dictionary, args.frame_id)
+            m = importers.from_course(text, args.source, args.dictionary, args.frame_id,
+                                      args.keep_header)
         else:
-            m = importers.from_ceiling_list(text, args.source, args.frame_id)
+            m = importers.from_ceiling_list(text, args.source, args.frame_id, args.keep_header)
     except (mm.MarkerMapError, ValueError) as e:
         print(f'ERROR: {e}')
         return 1

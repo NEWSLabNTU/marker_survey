@@ -78,6 +78,10 @@ browser (phase 5).
   result frame, frame definition included) and `frame.frame_sd_xy_max_cm`;
   the log says when the origin marker's facing dominates. Both now follow
   the real errors on the CI recordings (error / 1-sigma about 1).
+- `marker_map_import` copies only the comments next to markers; the
+  source's header and footer comments (about its own use: routes, tape
+  marks) are replaced by one line naming the source. `--keep-header`
+  copies them as before.
 
 ## 0.1.0 (2026-10-15)
 

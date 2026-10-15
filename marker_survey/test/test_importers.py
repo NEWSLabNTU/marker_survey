@@ -13,7 +13,7 @@ FIX = os.path.join(os.path.dirname(__file__), 'fixtures')
 SITES = {
     # fixture, kind, importer
     'test_course': ('test_course_source.yaml', 'course',
-                    lambda t: importers.from_course(t, dictionary='DICT_5X5_1000')),
+                    lambda t, **kw: importers.from_course(t, dictionary='DICT_5X5_1000', **kw)),
     'office': ('office_source.yaml', 'ceiling', importers.from_ceiling_list),
 }
 
@@ -23,29 +23,37 @@ def source_text(name):
         return f.read()
 
 
-def source_comments(text):
+def source_comments(text, header=True):
     out = []
-    for ln in text.splitlines():
+    lines = text.splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.strip() and not ln.lstrip().startswith('#'))
+    for ln in lines if header else lines[first:]:
         if '#' in ln:
             c = ln[ln.index('#') + 1:]
             out.append((c[1:] if c.startswith(' ') else c).rstrip())
     return [c for c in out if c]
 
 
+@pytest.mark.parametrize('keep_header', [False, True])
 @pytest.mark.parametrize('name', sorted(SITES))
-def test_import_write_and_load_back_give_the_same_poses_and_comments(name, tmp_path):
+def test_import_write_and_load_back_give_the_same_poses_and_comments(name, keep_header, tmp_path):
     text = source_text(name)
     _, kind, convert = SITES[name]
     want = importers.source_poses(kind, text)
     path = tmp_path / 'marker_map.yaml'
-    mm.write(convert(text), str(path))
+    mm.write(convert(text, keep_header=keep_header), str(path))
     back = mm.load(str(path))
     assert sorted(back.ids()) == sorted(want)
     for mid, T in want.items():
         assert np.abs(back.pose_of(mid) - T).max() < 1e-6, mid
     written = path.read_text()
-    for c in source_comments(text):
+    for c in source_comments(text, header=keep_header):
         assert c in written, c
+    header = set(source_comments(text)) - set(source_comments(text, header=False))
+    assert header
+    for c in header:
+        assert (c in written) == keep_header, c
+    assert ('Imported from' in written) != keep_header
     again = mm.dumps(back)
     assert again == written            # and the written file is stable
 
@@ -88,3 +96,8 @@ def test_the_import_tool(tmp_path, capsys):
     assert map_import.main(['ceiling-list', os.path.join(FIX, 'office_source.yaml'), str(out)]) == 0
     assert 'largest difference' in capsys.readouterr().out
     assert yaml.safe_load(out.read_text())['mount'] == 'ceiling'
+    assert out.read_text().startswith('# Imported from office_source.yaml by marker_map_import.')
+    assert 'Fixture for the importer' not in out.read_text()
+    assert map_import.main(['ceiling-list', os.path.join(FIX, 'office_source.yaml'), str(out),
+                            '--keep-header']) == 0
+    assert 'Fixture for the importer' in out.read_text()

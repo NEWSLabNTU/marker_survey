@@ -25,11 +25,15 @@ Two source formats, both lists of markers with angles in radians:
   yaw rotates the marker about the vertical; at yaw 0 its image x axis
   points along +x and it faces down (ceiling_marker_axes() below).
 
-Comments are carried over: the header, comment lines above a marker and the
-comment at the end of a marker's line. Not used at run time.
+Comments next to markers are carried over: comment lines above a marker and
+the comment at the end of a marker's line. The file's header and footer
+comments (often about the source's own use: routes, tape marks) are replaced
+by one line naming the source, unless keep_header is set. Not used at run
+time.
 """
 
 import math
+import os
 from typing import Optional
 
 import numpy as np
@@ -87,17 +91,23 @@ def _number(m: dict, k: str, source: str, default: Optional[float] = None) -> fl
     return float(v)
 
 
-def _finish(markers, comments, dictionary, size, frame_id, mount) -> mm.MarkerMap:
+def _finish(markers, comments, dictionary, size, frame_id, mount, source,
+            keep_header) -> mm.MarkerMap:
     for mk in markers:
         mk.comment = comments.marker_comment.get(mk.id)
         mk.comment_above = comments.marker_above.get(mk.id, [])
+    if keep_header:
+        header, footer = list(comments.header), list(comments.footer)
+    else:
+        header = [f'Imported from {os.path.basename(source)} by marker_map_import.']
+        footer = []
     return mm.MarkerMap(dictionary=dictionary, marker_size=float(size), markers=markers,
-                        frame_id=frame_id, mount=mount, header=list(comments.header),
-                        key_comments=dict(mm.DEFAULT_KEY_COMMENTS), footer=list(comments.footer))
+                        frame_id=frame_id, mount=mount, header=header,
+                        key_comments=dict(mm.DEFAULT_KEY_COMMENTS), footer=footer)
 
 
 def from_course(text: str, source: str = '<course>', dictionary: Optional[str] = None,
-                frame_id: str = 'map') -> mm.MarkerMap:
+                frame_id: str = 'map', keep_header: bool = False) -> mm.MarkerMap:
     d, comments = _parse(text, source)
     dic = dictionary or d.get('dictionary')
     if not dic or dic == 'ALL_DICTS':
@@ -113,10 +123,11 @@ def from_course(text: str, source: str = '<course>', dictionary: Optional[str] =
                   'turn_deg': math.degrees(roll)}
         markers.append(mm.MapMarker(int(m['id']), _number(m, 'x', source), _number(m, 'y', source),
                                     _number(m, 'z', source, height), 'wall', angles))
-    return _finish(markers, comments, dic, size, frame_id, 'wall')
+    return _finish(markers, comments, dic, size, frame_id, 'wall', source, keep_header)
 
 
-def from_ceiling_list(text: str, source: str = '<markers>', frame_id: str = 'map') -> mm.MarkerMap:
+def from_ceiling_list(text: str, source: str = '<markers>', frame_id: str = 'map',
+                      keep_header: bool = False) -> mm.MarkerMap:
     d, comments = _parse(text, source)
     dic = d.get('family') or d.get('dictionary')
     if not dic:
@@ -128,7 +139,7 @@ def from_ceiling_list(text: str, source: str = '<markers>', frame_id: str = 'map
         markers.append(mm.MapMarker(int(m['id']), _number(m, 'x', source), _number(m, 'y', source),
                                     _number(m, 'z', source), 'ceiling',
                                     {'rotation_deg': math.degrees(_number(m, 'yaw', source, 0.0))}))
-    return _finish(markers, comments, dic, size, frame_id, 'ceiling')
+    return _finish(markers, comments, dic, size, frame_id, 'ceiling', source, keep_header)
 
 
 def source_poses(kind: str, text: str) -> dict:
