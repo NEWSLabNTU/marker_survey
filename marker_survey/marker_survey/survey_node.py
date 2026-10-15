@@ -78,6 +78,7 @@ class MarkerSurveyNode(Node):
             self.declare_parameter(k, v)
         gp = lambda k: self.get_parameter(k).value  # noqa: E731
         self.p = p = SurveyParams(gp)
+        self.process_all = bool(gp('process_all'))
         self.detector = Detector(p.dictionary, p.min_marker_px, p.border_margin)
         self.compressed = bool(gp('compressed'))
         self.odom_topic = gp('odom_topic')
@@ -87,7 +88,7 @@ class MarkerSurveyNode(Node):
 
         self.survey = None
         self.lock = threading.Lock()
-        self.latest = None
+        self.queue = collections.deque(maxlen=300)
         self.odom = collections.deque(maxlen=2000)
         self.odom_child = None
         self.odom_frame = 'odom'
@@ -100,9 +101,12 @@ class MarkerSurveyNode(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         img_type = CompressedImage if self.compressed else Image
         topic = gp('image_topic') + ('/compressed' if self.compressed else '')
-        self.create_subscription(img_type, topic, self.on_image, qos_profile_sensor_data)
-        self.create_subscription(CameraInfo, gp('camera_info_topic'), self.on_info,
-                                 qos_profile_sensor_data)
+        # process_all (a recording): a reliable subscription loses no frame; live, a
+        # best-effort one matches any driver
+        qos = (QoSProfile(depth=100, reliability=ReliabilityPolicy.RELIABLE) if self.process_all
+               else qos_profile_sensor_data)
+        self.create_subscription(img_type, topic, self.on_image, qos)
+        self.create_subscription(CameraInfo, gp('camera_info_topic'), self.on_info, qos)
         if p.pose_source == 'odometry':
             # many drivers publish odometry BEST_EFFORT; a RELIABLE subscription never matches it
             self.create_subscription(
@@ -144,7 +148,9 @@ class MarkerSurveyNode(Node):
         self.odom_frame = msg.header.frame_id
 
     def on_image(self, msg):
-        self.latest = msg
+        if not self.process_all:
+            self.queue.clear()          # live: only the newest frame matters
+        self.queue.append(msg)
 
     # ------------------------------------------------------------ poses
     def lookup(self, parent: str, child: str, t: float):
@@ -181,16 +187,28 @@ class MarkerSurveyNode(Node):
 
     # ------------------------------------------------------------ work
     def on_tick(self):
-        msg = self.latest
-        if msg is None or self.survey is None:
-            return
+        """Process the queued frame (live: the newest one; process_all: every frame in
+        order). A frame whose pose has not arrived yet waits, up to 2 s of stamps."""
+        while self.queue and self.survey is not None:
+            msg = self.queue[0]
+            if not self.process(msg):
+                newest = stamp_sec(self.queue[-1].header.stamp)
+                if newest - stamp_sec(msg.header.stamp) < 2.0:
+                    return
+            if self.queue and self.queue[0] is msg:
+                self.queue.popleft()
+            if not self.process_all:
+                return
+
+    def process(self, msg) -> bool:
+        """Survey one frame; False if its pose is not available (yet)."""
         cam_frame = msg.header.frame_id
         if self.survey.T_cam_base is None:
             T = self.lookup(cam_frame, self.p.base_frame, 0.0)
             if T is None:
                 self.get_logger().info(f'waiting for TF {cam_frame} -> {self.p.base_frame}',
                                        throttle_duration_sec=5.0)
-                return
+                return False
             self.survey.T_cam_base = T
         t = stamp_sec(msg.header.stamp)
         T = self.pose_at(t, cam_frame)
@@ -200,8 +218,7 @@ class MarkerSurveyNode(Node):
                    if self.p.pose_source == 'odometry' else f'TF {self.p.pose_frame} -> {cam_frame}')
             self.get_logger().info(f'no camera pose for this frame yet: is {src} arriving?',
                                    throttle_duration_sec=5.0)
-            return
-        self.latest = None if self.latest is msg else self.latest
+            return False
         T_ref = None
         if self.p.frame.mode == 'align_to_track':
             T_ref = self.lookup(self.p.reference_frame, self.p.base_frame, t)
@@ -216,7 +233,7 @@ class MarkerSurveyNode(Node):
                                                     P=K).reshape(4, 2)
         except Exception as e:  # noqa: BLE001
             self.get_logger().error(f'image: {e}', throttle_duration_sec=5.0)
-            return
+            return True
         self.frames += 1
         with self.lock:
             known = set(self.survey.markers)
@@ -233,6 +250,7 @@ class MarkerSurveyNode(Node):
                                    f'{len(self.survey.markers)} so far')
         if new:
             self.publish_markers()
+        return True
 
     def on_status(self):
         if self.survey is None:

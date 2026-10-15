@@ -94,6 +94,7 @@ PARAMETERS = {
     'frame.reference_frame': '',
     'floor_offset': 0.0,
     'rate': 5.0,
+    'process_all': False,
     'pose_tolerance': 0.1,
     'save_on_exit': True,
     'keyframe_distance': 0.15,

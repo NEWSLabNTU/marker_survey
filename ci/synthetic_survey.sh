@@ -12,7 +12,7 @@ scene=${1:?scene name}
 out=${2:-tmp/ci}/$scene
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-37}
 sites=examples/sites
-common=(--ros-args -p use_sim_time:=true -p output_dir:=$PWD/$out/result -p rate:=10.0)
+common=(--ros-args -p use_sim_time:=true -p output_dir:=$PWD/$out/result -p rate:=10.0 -p process_all:=true)
 
 case $scene in
   wall)
@@ -22,12 +22,12 @@ case $scene in
     node=(-p dictionary:=DICT_5X5_1000 -p marker_size:=0.38 -p pose_source:=odometry
           -p frame.mode:=origin_marker -p frame.origin_marker:=10)
     truth=truth_origin.yaml
-    limits=(--max-median-cm ${WALL_MEDIAN_CM:-3.0} --max-cm ${WALL_MAX_CM:-4.5})
+    limits=(--max-median-cm ${WALL_MEDIAN_CM:-1.0} --max-cm ${WALL_MAX_CM:-4.0})
     ;;
   ceiling_pose_frame)
     # 9 ceiling markers, upward camera, the map pose noisy (6 cm per axis)
     gen=(--map $sites/office/marker_map.yaml --route $sites/office/route.csv
-         --camera upward --laps 2 --rate 5 --map-noise 0.06 --map-noise-yaw-deg 1.0)
+         --camera upward --laps 2 --rate 5 --speed 0.5 --map-noise 0.06 --map-noise-yaw-deg 1.0)
     node=(-p dictionary:=tag36h11 -p marker_size:=0.45 -p pose_source:=tf -p pose_frame:=map
           -p frame.mode:=pose_frame -p pose_sd:=0.06)
     truth=truth_map.yaml
@@ -35,7 +35,7 @@ case $scene in
     ;;
   ceiling_align)
     gen=(--map $sites/office/marker_map.yaml --route $sites/office/route.csv
-         --camera upward --laps 2 --rate 5 --map-noise 0.06 --map-noise-yaw-deg 1.0)
+         --camera upward --laps 2 --rate 5 --speed 0.5 --map-noise 0.06 --map-noise-yaw-deg 1.0)
     node=(-p dictionary:=tag36h11 -p marker_size:=0.45 -p pose_source:=odometry
           -p frame.mode:=align_to_track -p frame.reference_frame:=map)
     truth=truth_map.yaml
@@ -43,7 +43,7 @@ case $scene in
     ;;
   ceiling_uneven)
     gen=(--map $sites/office_uneven/marker_map.yaml --route $sites/office_uneven/route.csv
-         --camera upward --laps 2 --rate 5 --map-noise 0.06 --map-noise-yaw-deg 1.0)
+         --camera upward --laps 2 --rate 5 --speed 0.5 --map-noise 0.06 --map-noise-yaw-deg 1.0)
     node=(-p dictionary:=tag36h11 -p marker_size:=0.45 -p pose_source:=odometry
           -p frame.mode:=align_to_track -p frame.reference_frame:=map)
     truth=truth_map.yaml
@@ -65,7 +65,7 @@ for _ in $(seq 60); do
   ros2 service list 2>/dev/null | grep -q /marker_survey/save && break
   sleep 1
 done
-ros2 bag play "$out/bag" --clock > "$out/play.log" 2>&1
+ros2 bag play "$out/bag" --clock --delay 3 > "$out/play.log" 2>&1
 sleep 2
 timeout 600 ros2 service call /marker_survey/save std_srvs/srv/Trigger | tail -2
 kill -TERM $node_pid 2>/dev/null || true

@@ -51,7 +51,7 @@ jobs:
       fail-fast: false
       matrix:
         distro: [humble, jazzy]
-        scene: [wall]
+        scene: [wall, ceiling_pose_frame, ceiling_align, ceiling_uneven]
     runs-on: ubuntu-24.04
     container: ros:${{ matrix.distro }}
     defaults:
