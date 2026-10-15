@@ -40,7 +40,8 @@ PARAMETERS = {
 
 def main(args=None):
     import rclpy
-    from rclpy.executors import ExternalShutdownException
+
+    from marker_survey.spin import spin
 
     from marker_localizer.core.check import CheckSettings
     from marker_survey_web.hub import Hub
@@ -72,9 +73,7 @@ def main(args=None):
                            f'survey node {gp("survey_node")}, localizer {gp("localizer_node")}, '
                            f'map in use {gp("map_path") or "(from the localizer)"}')
     try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
+        spin(node)
     finally:
         hub.stop()
         stopper = threading.Thread(target=server.shutdown, daemon=True)

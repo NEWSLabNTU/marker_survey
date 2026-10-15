@@ -59,6 +59,7 @@ from marker_survey.core.se3 import make_T, matrix_to_quat, pose_at_stamp, quat_t
 from marker_survey.core.solve import DATA_FILE, MAP_FILE, REPORT_FILE, finish, save_dump
 from marker_survey.core.survey import Survey
 from marker_survey.params import PARAMETERS, SurveyParams
+from marker_survey.spin import spin
 
 
 def tf_to_T(t) -> np.ndarray:
@@ -489,9 +490,7 @@ def main(args=None):
         rclpy.shutdown()
         raise SystemExit(2)
     try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
-        pass
+        spin(node)
     finally:
         if node.save_on_exit and not node.saved:
             ok, msg = node.save()

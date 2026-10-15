@@ -124,7 +124,10 @@ example job takes 6 to 9 minutes.
   node with a bounded wait (`ci/lib.sh`: the signal, 30 s, then SIGKILL,
   with a line in the log when it was needed), the example script stops
   `ros2 launch` with SIGINT as Ctrl-C would, and every CI job has a
-  30 minute limit. No job has needed the SIGKILL since.
+  30 minute limit. No job has needed the SIGKILL since. Later the nodes
+  were moved off `rclpy.spin` to a loop that waits at most 0.5 s at a time
+  and handles SIGTERM itself (`marker_survey/spin.py`); the hang never
+  reproduced locally, so its cause stays unconfirmed.
 - **Dropped frames under load.** A first local run of the wall example,
   with a second example running beside it, gave a median of 1.85 cm: about
   25 frames had been dropped because odometry messages were lost on the

@@ -58,6 +58,7 @@ import tf2_ros
 from marker_survey.core import marker_map as mm
 from marker_survey.core.detection import Detector
 from marker_survey.core.se3 import interpolate_T, make_T, matrix_to_quat, quat_to_matrix
+from marker_survey.spin import spin
 from marker_survey.survey_node import decode, stamp_sec, tf_to_T
 
 from marker_localizer.core.check import fix_record, marker_views
@@ -420,9 +421,7 @@ def main(args=None):
         rclpy.shutdown()
         raise SystemExit(2)
     try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
-        pass
+        spin(node)
     finally:
         node.destroy_node()
         if rclpy.ok():

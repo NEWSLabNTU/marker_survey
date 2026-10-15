@@ -103,6 +103,14 @@ browser (phase 5).
   `marker_survey_synthetic --drop-odom F` leaves out a share of the
   odometry messages; `ci/synthetic_survey.sh wall` drops 3 % and fails on
   any frame dropped.
+- The survey, localizer and web nodes spin through `marker_survey.spin`:
+  SIGTERM sets a flag and the executor waits at most 0.5 s at a time, so
+  a node exits within that on SIGTERM or Ctrl-C whatever wakes or does not
+  wake its wait. Before, `rclpy.spin` relied on rclpy's own SIGTERM
+  handling, and a survey node once did not exit in CI on Jazzy (with sim
+  time and the recording over, none of its timers fired any more). The
+  hang did not reproduce locally (37 runs of the CI sequence, 60 of an idle
+  node); `ci/lib.sh` keeps its bounded stop.
 - `marker_map_import` rounds the angles it converts from radians within
   the source's own precision, by at most 0.005 deg: 0.5236 rad is
   `facing_deg: 30.0`, no longer 30.00007. Its check against the source
