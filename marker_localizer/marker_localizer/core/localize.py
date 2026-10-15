@@ -33,7 +33,10 @@ linear zone and lets them drop out of the solve (phase 0).
 
 Gate: a fix farther than `gate_distance` or `gate_angle_deg` from a prior
 pose (the state estimator's) is rejected: a misread id, a moved marker, a far
-marker with a poor angle.
+marker with a poor angle. With the prior's covariance, the gate widens to
+`gate_sigmas` times the prior's own sd where that is larger, so an estimator
+that does not know where the robot is (just started, variance 100) accepts
+the first fixes, while a confident one still gates at the fixed sizes.
 
 Frames: map (the marker map's frame), base (the robot), camera (optical:
 x right, y down, z forward). T_a_b maps b-frame points into frame a. ROS
@@ -70,6 +73,7 @@ class LocalizerSettings:
     ambiguity_px: float = 1.0        # factor (or under this many px) of the best are ambiguous
     gate_distance: float = 1.0       # [m]
     gate_angle_deg: float = 15.0
+    gate_sigmas: float = 3.0         # the gate is at least this many prior sd wide; 0: fixed gate
 
     def check(self):
         if self.mode not in MODES:
@@ -78,6 +82,8 @@ class LocalizerSettings:
             raise ValueError('pixel_sd and robust_px must be positive')
         if self.gate_distance <= 0 or self.gate_angle_deg <= 0:
             raise ValueError('gate_distance and gate_angle_deg must be positive')
+        if not self.gate_sigmas >= 0:
+            raise ValueError('gate_sigmas must be 0 (a fixed gate) or positive')
 
 
 @dataclass
@@ -152,12 +158,14 @@ class Localizer:
 
     # ------------------------------------------------------------ the entry point
     def locate(self, detections: List[Detection], T_prior: Optional[np.ndarray] = None,
-               roll: float = 0.0, pitch: float = 0.0) -> Result:
+               roll: float = 0.0, pitch: float = 0.0,
+               prior_cov: Optional[np.ndarray] = None) -> Result:
         """A fix from one image's detections (pinhole pixels: undistorted corners).
 
         T_prior: the state estimator's base pose at the image's time, or None; it
         resolves the single-marker ambiguity (3d) and gates the fix. roll, pitch: the
-        robot's tilt [rad] (planar)."""
+        robot's tilt [rad] (planar). prior_cov: the prior's 6 x 6 covariance (ROS
+        order), or None; it widens the gate (gate_size)."""
         res = Result(None)
         use = []
         for d in detections:
@@ -202,7 +210,7 @@ class Localizer:
             res.reason = f'uncertain: position sd {sd:.2f} m, over max_position_sd {self.s.max_position_sd}'
             return res
         if T_prior is not None:
-            g = self.gate(fix, T_prior)
+            g = self.gate(fix, T_prior, prior_cov)
             if g:
                 res.reason = g
         return res
@@ -215,8 +223,29 @@ class Localizer:
         relocalizer recovering from a wrong estimate (a kidnapped robot) needs."""
         return res.fix is not None and res.reason.startswith('gated')
 
-    def gate(self, fix: Fix, T_prior: np.ndarray) -> str:
+    def gate_size(self, prior_cov: Optional[np.ndarray] = None) -> Tuple[float, float]:
+        """The gate [m], [deg]: gate_distance and gate_angle_deg, or gate_sigmas times
+        the prior's sd where larger. The prior's position sd is the largest along any
+        direction (x, y in planar mode; x, y, z in 3d), its angle sd that of yaw (planar)
+        or the largest of the rotation (3d). A zero or missing covariance (unknown)
+        leaves the fixed gate; an infinite variance opens it."""
+        dist, ang = self.s.gate_distance, self.s.gate_angle_deg
+        if prior_cov is None or self.s.gate_sigmas <= 0:
+            return dist, ang
+        C = np.nan_to_num(np.asarray(prior_cov, float).reshape(6, 6), nan=0.0, posinf=1e12,
+                          neginf=0.0)
+        k = self.s.gate_sigmas
+        if self.s.mode == 'planar':
+            pos, rot = C[:2, :2], C[5:, 5:]
+        else:
+            pos, rot = C[:3, :3], C[3:, 3:]
+        sd_pos = math.sqrt(max(float(np.linalg.eigvalsh(pos).max()), 0.0))
+        sd_rot = math.sqrt(max(float(np.linalg.eigvalsh(rot).max()), 0.0))
+        return max(dist, k * sd_pos), max(ang, math.degrees(k * sd_rot))
+
+    def gate(self, fix: Fix, T_prior: np.ndarray, prior_cov: Optional[np.ndarray] = None) -> str:
         """'' if the fix agrees with the prior pose, else why not."""
+        gate_dist, gate_ang = self.gate_size(prior_cov)
         d = fix.T_map_base[:3, 3] - T_prior[:3, 3]
         if self.s.mode == 'planar':
             dist = float(np.hypot(d[0], d[1]))
@@ -224,11 +253,10 @@ class Localizer:
         else:
             dist = float(np.linalg.norm(d))
             ang = rotation_angle(fix.T_map_base[:3, :3], T_prior[:3, :3])
-        if dist > self.s.gate_distance:
-            return f'gated: {dist:.2f} m from the prior (gate_distance {self.s.gate_distance})'
-        if math.degrees(ang) > self.s.gate_angle_deg:
-            return (f'gated: {math.degrees(ang):.1f} deg from the prior '
-                    f'(gate_angle_deg {self.s.gate_angle_deg})')
+        if dist > gate_dist:
+            return f'gated: {dist:.2f} m from the prior (gate {gate_dist:.2f} m)'
+        if math.degrees(ang) > gate_ang:
+            return f'gated: {math.degrees(ang):.1f} deg from the prior (gate {gate_ang:.1f} deg)'
         return ''
 
     # ------------------------------------------------------------ helpers

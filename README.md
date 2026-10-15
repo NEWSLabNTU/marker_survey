@@ -225,6 +225,10 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/my_site/marke
   `prior_type: odometry`, `Odometry`): fixes farther than `gate_distance`
   (1 m) or `gate_angle_deg` (15) from it are dropped (a misread id, a moved
   marker); in 3d it also picks between the two solutions of a lone marker.
+  The gate widens to `gate_sigmas` (3) times the prior's own sd where that
+  is larger, so an estimator that does not yet know where the robot is
+  (variance 100 at start) takes the first fixes; `rejected_topic` gets the
+  fixes the gate turns down, for a relocalizer.
 - `enabled` can be switched at run time (`ros2 param set /marker_localizer
   enabled false`); `~/debug/image` shows the markers used (green, the map's
   corners projected with the fix as dots, the residual written), left out

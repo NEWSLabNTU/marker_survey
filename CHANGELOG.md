@@ -6,6 +6,16 @@ its own `version` (now 1); the loader keeps reading older versions.
 
 ## Unreleased
 
+### Localizer
+
+- Parameter and launch argument `gate_sigmas` (3.0): the gate widens to
+  that many sd of the prior's own covariance where that is larger than
+  `gate_distance` or `gate_angle_deg`, so a state estimator that does not
+  know where the robot is (variance 100 at start) takes the fixes, while
+  a confident one gates as before. 0: the fixed gate always. The gate's
+  reason now names the gate it used (`gate 1.00 m`). `rejected_topic`
+  is unchanged.
+
 ### Launch files
 
 - `localizer.launch.xml`, `survey.launch.xml` and `web.launch.xml` take

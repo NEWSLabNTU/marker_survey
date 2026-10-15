@@ -135,7 +135,10 @@ class MarkerLocalizerNode(Node):
              f'(frame {self.map.frame_id})' if self.map is not None else 'no map yet')
             + f'; mode {p.mode}; '
             + (f'gate against {p.prior_topic}: {p.settings.gate_distance} m, '
-               f'{p.settings.gate_angle_deg} deg' if p.prior_topic else 'no prior, no gate'))
+               f'{p.settings.gate_angle_deg} deg'
+               + (f', or {p.settings.gate_sigmas} prior sd where wider'
+                  if p.settings.gate_sigmas > 0 else '')
+               if p.prior_topic else 'no prior, no gate'))
 
     # ------------------------------------------------------------ the map
     def load_map(self, path: str):
@@ -195,12 +198,13 @@ class MarkerLocalizerNode(Node):
         pose = msg.pose.pose
         t = stamp_sec(msg.header.stamp)
         self.n['priors'] += 1
+        item = (t, pose_msg_to_T(pose), np.array(msg.pose.covariance, float).reshape(6, 6))
         if self.priors and t < self.priors[-1][0]:      # late: keep the buffer in order
-            items = sorted(list(self.priors) + [(t, pose_msg_to_T(pose))], key=lambda x: x[0])
+            items = sorted(list(self.priors) + [item], key=lambda x: x[0])
             self.priors.clear()
             self.priors.extend(items)
         else:
-            self.priors.append((t, pose_msg_to_T(pose)))
+            self.priors.append(item)
         if self.pending:
             self.drain()
 
@@ -227,20 +231,22 @@ class MarkerLocalizerNode(Node):
             return None
 
     def prior_at(self, t):
-        """The prior pose at stamp t: interpolated, or the nearest within prior_tolerance."""
+        """The prior pose at stamp t and its covariance: interpolated (the covariance
+        of the nearer of the two), or the nearest within prior_tolerance; else
+        (None, None)."""
         if not self.priors:
-            return None
+            return None, None
         pr = list(self.priors)
         ts = np.array([x[0] for x in pr])
         i = int(np.searchsorted(ts, t))
         tol = self.p.prior_tolerance
         if 0 < i < len(pr) and ts[i] - ts[i - 1] <= 2 * tol:
             f = (t - ts[i - 1]) / max(ts[i] - ts[i - 1], 1e-9)
-            return interpolate_T(pr[i - 1][1], pr[i][1], f)
+            return interpolate_T(pr[i - 1][1], pr[i][1], f), pr[i if f >= 0.5 else i - 1][2]
         j = min(max(i, 0), len(pr) - 1)
         if i > 0 and (i >= len(pr) or abs(ts[i - 1] - t) < abs(ts[j] - t)):
             j = i - 1
-        return pr[j][1] if abs(ts[j] - t) <= tol else None
+        return (pr[j][1], pr[j][2]) if abs(ts[j] - t) <= tol else (None, None)
 
     def roll_pitch(self, t):
         if self.p.mode != 'planar' or self.p.roll_pitch == 'zero':
@@ -297,13 +303,14 @@ class MarkerLocalizerNode(Node):
             self.get_logger().info(f'no roll and pitch ({self.p.roll_pitch}) for this frame',
                                    throttle_duration_sec=5.0)
             return
-        T_prior = self.prior_at(t) if self.p.prior_topic else None
+        T_prior, prior_cov = self.prior_at(t) if self.p.prior_topic else (None, None)
         if self.p.prior_topic and T_prior is None:
             self.n['no prior'] += 1
             if self.p.require_prior:
                 self.get_logger().info(f'no prior pose from {self.p.prior_topic} near this frame: '
                                        'fix not published (require_prior)', throttle_duration_sec=5.0)
-        res = self.localizer.locate(dets, T_prior=T_prior, roll=rp[0], pitch=rp[1])
+        res = self.localizer.locate(dets, T_prior=T_prior, roll=rp[0], pitch=rp[1],
+                                    prior_cov=prior_cov)
         t2 = time.perf_counter()
         self.t_detect.append(t1 - t0)
         self.t_fit.append(t2 - t1)

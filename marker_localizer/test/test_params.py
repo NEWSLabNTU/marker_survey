@@ -21,6 +21,7 @@ def test_defaults_are_valid():
     ({'roll_pitch': 'tf'}, 'roll_pitch_frame'),
     ({'prior_type': 'twist'}, 'prior_type'),
     ({'gate_distance': 0.0}, 'gate_distance'),
+    ({'gate_sigmas': -1.0}, 'gate_sigmas'),
 ])
 def test_errors_name_the_parameter(kw, msg):
     with pytest.raises(ValueError, match=msg):
@@ -46,5 +47,5 @@ def test_the_launch_file_passes_its_arguments_with_the_node_defaults():
             want = str(default).lower() if isinstance(default, bool) else str(default)
             assert args[name] == want, (name, args[name], default)
     for name in ('max_distance', 'min_sd', 'min_sd_deg', 'max_position_sd', 'require_prior',
-                 'prior_tolerance', 'param_file', 'node_name'):
+                 'prior_tolerance', 'param_file', 'gate_sigmas', 'node_name'):
         assert name in args, name

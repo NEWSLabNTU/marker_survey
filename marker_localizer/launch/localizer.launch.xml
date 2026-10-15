@@ -27,6 +27,7 @@
   <arg name="prior_type" default="pose" description="pose (PoseWithCovarianceStamped) or odometry (nav_msgs/Odometry)"/>
   <arg name="gate_distance" default="1.0" description="[m] fixes farther from the prior are dropped"/>
   <arg name="gate_angle_deg" default="15.0"/>
+  <arg name="gate_sigmas" default="3.0" description="the gate widens to this many sd of the prior's own covariance; 0: fixed gate"/>
   <arg name="roll_pitch" default="zero" description="planar: the robot's roll and pitch from zero, tf or imu"/>
   <arg name="roll_pitch_frame" default="" description="roll_pitch tf: a level frame, such as odom"/>
   <arg name="imu_topic" default="/imu"/>
@@ -55,6 +56,7 @@
     <param name="prior_type" value="$(var prior_type)"/>
     <param name="gate_distance" value="$(var gate_distance)"/>
     <param name="gate_angle_deg" value="$(var gate_angle_deg)"/>
+    <param name="gate_sigmas" value="$(var gate_sigmas)"/>
     <param name="roll_pitch" value="$(var roll_pitch)"/>
     <param name="roll_pitch_frame" value="$(var roll_pitch_frame)"/>
     <param name="imu_topic" value="$(var imu_topic)"/>

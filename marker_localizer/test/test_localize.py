@@ -238,6 +238,52 @@ def test_a_fix_far_from_a_wrong_prior_is_gated_and_marked_for_relocalization():
     assert L.accepted(good) and not L.gated(good)
 
 
+def test_the_gate_widens_with_the_prior_covariance():
+    """An estimator that does not know where the robot is (a map-frame EKF just
+    started, variance 100) lets a fix 5 m and 90 deg away through; a confident prior
+    (sd 5 cm) still gates it, as does an uncertain one with gate_sigmas 0 (fixed gate).
+    A gated fix stays marked for rejected_topic."""
+    m, route = site('office')
+    cam = sim.upward_camera()
+    f = frames_of(route, laps=1)[40]
+    dets = sim.project(m.poses(), m.sizes(), cam, f.T_map_base @ cam.T_base_cam,
+                       np.random.default_rng(0), PIXEL_SD)
+    wrong = planar_T(f.T_map_base[0, 3] + 4.0, f.T_map_base[1, 3] - 3.0,
+                     math.atan2(f.T_map_base[1, 0], f.T_map_base[0, 0]) + math.pi / 2)
+    uncertain = np.eye(6) * 100.0
+    confident = np.diag([0.05 ** 2, 0.05 ** 2, 1e-4, 1e-4, 1e-4, math.radians(2.0) ** 2])
+    for mode in ('planar', '3d'):
+        L = Localizer(m, cam.K, cam.T_base_cam, LocalizerSettings(mode=mode))
+        res = L.locate(dets, T_prior=wrong, prior_cov=uncertain)
+        assert L.accepted(res), res.reason
+        assert np.linalg.norm(res.fix.T_map_base[:2, 3] - f.T_map_base[:2, 3]) < 0.05
+        for cov in (confident, None, np.zeros((6, 6))):
+            res = L.locate(dets, T_prior=wrong, prior_cov=cov)
+            assert not L.accepted(res) and L.gated(res), (mode, res.reason)
+        fixed = Localizer(m, cam.K, cam.T_base_cam, LocalizerSettings(mode=mode, gate_sigmas=0))
+        res = fixed.locate(dets, T_prior=wrong, prior_cov=uncertain)
+        assert fixed.gated(res), res.reason
+
+
+def test_the_gate_size():
+    L = Localizer.__new__(Localizer)
+    L.s = LocalizerSettings(mode='planar')
+    assert L.gate_size(None) == (1.0, 15.0)
+    assert L.gate_size(np.diag([0.1, 0.1, 1e6, 1e6, 1e6, 0.0001])) == (1.0, 15.0)
+    d, a = L.gate_size(np.diag([0.25, 1.0, 0, 0, 0, math.radians(10) ** 2]))
+    assert d == pytest.approx(3.0) and a == pytest.approx(30.0)
+    # correlated x and y: the largest sd along any direction
+    C = np.zeros((6, 6))
+    C[:2, :2] = [[0.5, 0.5], [0.5, 0.5]]
+    assert L.gate_size(C)[0] == pytest.approx(3.0)
+    C[0, 0] = np.inf
+    assert L.gate_size(C)[0] > 1e5
+    L.s = LocalizerSettings(mode='3d')
+    assert L.gate_size(np.diag([0.01, 0.01, 4.0, 1.0, 0, 0]))[0] == pytest.approx(6.0)
+    assert L.gate_size(np.diag([0.01, 0.01, 4.0, 1.0, 0, 0]))[1] == pytest.approx(
+        math.degrees(3.0))
+
+
 def test_single_marker_ambiguity_resolved_towards_the_prior():
     """A board seen at an angle from 4 m: its two IPPE solutions reproject alike; the
     prior picks the right one."""

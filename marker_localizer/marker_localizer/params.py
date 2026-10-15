@@ -49,7 +49,7 @@ class LocalizerParams:
             max_position_sd=float(get('max_position_sd')), min_sd=float(get('min_sd')),
             min_sd_deg=float(get('min_sd_deg')), tilt_sd_deg=float(get('tilt_sd_deg')),
             base_height=float(get('base_height')), gate_distance=float(get('gate_distance')),
-            gate_angle_deg=float(get('gate_angle_deg')))
+            gate_angle_deg=float(get('gate_angle_deg')), gate_sigmas=float(get('gate_sigmas')))
         self.settings.check()
 
 
@@ -68,6 +68,7 @@ PARAMETERS = {
     'require_prior': False,
     'gate_distance': 1.0,
     'gate_angle_deg': 15.0,
+    'gate_sigmas': 3.0,
     'enabled': True,
     'process_all': False,
     'roll_pitch': 'zero',

@@ -183,12 +183,13 @@ file instead of starting the node itself; `survey.launch.xml` takes
 | `compressed` | false | yes | subscribe to `image_topic/compressed` |
 | `pose_topic` | `~/pose` | yes | the output |
 | `prior_topic` | `''` | yes | the estimator's pose; empty: no gate |
-| `rejected_topic` | `''` | yes | if set, fixes that only the gate turned down (farther from the prior than `gate_distance` or `gate_angle_deg`) are published here, `PoseWithCovarianceStamped` as `pose_topic`: for a relocalizer recovering a robot whose estimate is lost; empty: not published |
+| `rejected_topic` | `''` | yes | if set, fixes that only the gate turned down (farther from the prior than the gate, `gate_distance` and `gate_angle_deg` or `gate_sigmas` of the prior's sd) are published here, `PoseWithCovarianceStamped` as `pose_topic`: for a relocalizer recovering a robot whose estimate is lost; empty: not published |
 | `prior_type` | `pose` | yes | `pose` (PoseWithCovarianceStamped) or `odometry` |
 | `prior_tolerance` | 0.5 | yes | [s] the prior is interpolated at the image's stamp, or the nearest within this |
 | `require_prior` | false | yes | publish no fix while no prior is near the image's stamp |
 | `gate_distance` | 1.0 | yes | [m] fixes farther than this from the prior are dropped (a misread ID, a moved marker) |
 | `gate_angle_deg` | 15.0 | yes | the same for yaw |
+| `gate_sigmas` | 3.0 | yes | the gate widens to this many sd of the prior's covariance where that is larger than `gate_distance` or `gate_angle_deg`: position, the largest sd in x, y (`planar`) or x, y, z (`3d`); angle, yaw (`planar`) or the largest of the rotation (`3d`). A confident prior (sd under a third of the gate) gates as before; an estimator just started (variance 100) lets the fixes through, so a robot without a relocalizer of its own is placed by the markers. A zero covariance (unknown) keeps the fixed gate; 0: the fixed gate always |
 | `enabled` | true | | can be set at run time: `ros2 param set /marker_localizer enabled false` |
 | `process_all` | false | yes | every frame in order, each once its prior has arrived (recordings) |
 | `roll_pitch` | `zero` | yes | `planar`: the robot's roll and pitch from `zero`, `tf` or `imu` |
