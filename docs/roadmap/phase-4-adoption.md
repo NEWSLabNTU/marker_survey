@@ -78,8 +78,9 @@ result as the bare nodes. The limits in `ci/example.sh` are the phase 2 and
 3 targets: wall survey median 1 cm, max 4 cm, localizer mean 2 cm, max
 10 cm; ceiling survey median 2 cm, localizer mean 1 cm, max 3 cm. The
 ceiling localizer works on the surveyed map, so its error includes the
-survey's; it stays within the 0.5 cm of phase 3's localizer on the true map
-plus the survey's 0.3 cm. Each example job takes 7 to 8 minutes.
+survey's: on the true map the same recording gave 0.02 / 0.13 cm in
+phase 3, and the 0.3 cm here is the surveyed markers' own error. Each
+example job takes 6 to 9 minutes.
 
 ### Pieces
 
@@ -129,5 +130,5 @@ plus the survey's 0.3 cm. Each example job takes 7 to 8 minutes.
   25 frames had been dropped because odometry messages were lost on the
   best-effort subscription (a gap over 0.2 s leaves the frames in it
   without a pose). With `process_all` the subscription now keeps 1000
-  messages; six runs side by side then all gave the CI numbers, with at
-  most one frame dropped.
+  messages; four recordings run side by side with both distros' unit
+  tests then all gave the CI numbers, with at most one frame dropped.
