@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<!--
+  No robot: a laptop with a USB webcam pointing up at the ceiling markers,
+  carried along the routes a robot would drive. The survey uses the camera
+  alone (pose_source markers: no odometry, no TF); the localizer runs in 3d
+  mode with no prior; the web interface runs on the same laptop.
+
+    ros2 launch marker_survey_web handheld.launch.xml site:=$PWD/sites/my_site \
+        camera_params:=$PWD/my_webcam.yaml
+
+  then open http://127.0.0.1:8090/ (Plan, Print, Survey, Test). The survey
+  writes to <site>/survey/; "Use the map" writes <site>/marker_map.yaml, which
+  the localizer reads (it waits for the file on a new site).
+
+  The camera's optical frame is the base frame of both nodes (camera_frame,
+  the frame_id of the images): no robot frames, no TF. The marker you start
+  the survey from defines the map's frame.
+
+  launch_camera:=false: the images come from elsewhere (another driver, a
+  recording: image_topic, camera_info_topic, use_sim_time:=true
+  process_all:=true). The camera needs a calibration (camera_info with a focal
+  length): see config/handheld_usb_cam.yaml.
+
+  survey:=false or localizer:=false leaves that node out (each processes every
+  image, so a slow laptop runs one at a time).
+-->
+<launch>
+  <arg name="site" description="the site's directory: marker_map.yaml and survey/ in it"/>
+  <arg name="launch_camera" default="true" description="start usb_cam for the webcam"/>
+  <arg name="camera_params" default="$(find-pkg-share marker_survey_web)/config/handheld_usb_cam.yaml"
+       description="usb_cam's parameters: device, size, calibration (camera_info_url), frame_id"/>
+  <arg name="camera_namespace" default="camera" description="usb_cam publishes image_raw and camera_info in it"/>
+  <arg name="camera_frame" default="camera" description="the images' frame_id: the base frame of both nodes"/>
+  <arg name="image_topic" default="/camera/image_raw"/>
+  <arg name="camera_info_topic" default="/camera/camera_info"/>
+  <arg name="survey" default="true" description="run the survey node (started from the page)"/>
+  <arg name="localizer" default="true" description="run the localizer on the site's map"/>
+  <arg name="dictionary" default="tag36h11"/>
+  <arg name="marker_size" default="0.40" description="[m] edge of the BLACK SQUARE, measured on a printed sheet"/>
+  <arg name="localizer_mode" default="3d" description="3d (a handheld camera tilts) or planar"/>
+  <arg name="port" default="8090"/>
+  <arg name="host" default="127.0.0.1" description="0.0.0.0: reachable from a phone on the same network"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="process_all" default="false" description="every frame in order (recordings)"/>
+
+  <node pkg="usb_cam" exec="usb_cam_node_exe" name="usb_cam" namespace="$(var camera_namespace)"
+        output="screen" if="$(var launch_camera)">
+    <param from="$(var camera_params)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <group if="$(var survey)">
+    <include file="$(find-pkg-share marker_survey)/launch/survey.launch.xml">
+      <arg name="output_dir" value="$(var site)/survey"/>
+      <arg name="dictionary" value="$(var dictionary)"/>
+      <arg name="marker_size" value="$(var marker_size)"/>
+      <arg name="pose_source" value="markers"/>
+      <arg name="frame_mode" value="origin_marker"/>
+      <arg name="base_frame" value="$(var camera_frame)"/>
+      <arg name="image_topic" value="$(var image_topic)"/>
+      <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+      <arg name="process_all" value="$(var process_all)"/>
+      <arg name="start_paused" value="true"/>
+    </include>
+  </group>
+  <group if="$(var localizer)">
+    <include file="$(find-pkg-share marker_localizer)/launch/localizer.launch.xml">
+      <arg name="marker_map" value="$(var site)/marker_map.yaml"/>
+      <arg name="mode" value="$(var localizer_mode)"/>
+      <arg name="base_frame" value="$(var camera_frame)"/>
+      <arg name="image_topic" value="$(var image_topic)"/>
+      <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+      <arg name="prior_topic" value=""/>
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+      <arg name="process_all" value="$(var process_all)"/>
+    </include>
+  </group>
+  <group>
+    <include file="$(find-pkg-share marker_survey_web)/launch/web.launch.xml">
+      <arg name="map_path" value="$(var site)/marker_map.yaml"/>
+      <arg name="host" value="$(var host)"/>
+      <arg name="port" value="$(var port)"/>
+      <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    </include>
+  </group>
+</launch>

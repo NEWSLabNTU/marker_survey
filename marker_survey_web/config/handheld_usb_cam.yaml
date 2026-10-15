@@ -1,0 +1,19 @@
+# usb_cam for handheld.launch.xml: a USB webcam pointing up at the ceiling, 640 x 480.
+# Copy this file, set camera_info_url to your camera's calibration (ros2 run
+# camera_calibration cameracalibrator ...; without one the camera_info has no focal
+# length and the survey and localizer wait), and pass it as camera_params:=<file>.
+# frame_id must match the launch file's camera_frame argument.
+/**:
+  ros__parameters:
+    video_device: /dev/video0
+    framerate: 30.0
+    io_method: mmap
+    frame_id: camera
+    pixel_format: mjpeg2rgb
+    image_width: 640
+    image_height: 480
+    camera_name: ceiling_webcam
+    camera_info_url: ""
+    # a short exposure keeps the markers sharp while walking: the plan screen's
+    # motion blur assumes 20 ms; some webcams need auto exposure off for it
+    autoexposure: true
