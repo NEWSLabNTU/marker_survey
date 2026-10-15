@@ -67,7 +67,7 @@ def annotate(image: np.ndarray, found: List[Found]) -> np.ndarray:
         cv2.polylines(out, [c.astype(np.int32)], True, (40, 200, 40), thick, cv2.LINE_AA)
         cv2.circle(out, tuple(int(v) for v in c[0]), thick * 2, (40, 40, 220), -1, cv2.LINE_AA)
         text = str(f.id)
-        font_scale = max(0.8, edge / 90.0)
+        font_scale = max(0.8, edge / 160.0)
         (tw, th), base = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick * 2)
         cx, cy = c.mean(axis=0)
         org = (int(cx - tw / 2), int(cy + th / 2))
