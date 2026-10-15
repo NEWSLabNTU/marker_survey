@@ -36,12 +36,17 @@ def site(name):
             load_path_csv(os.path.join(SITES[name], 'route.csv')))
 
 
-def survey(m, route, camera, mode, laps, step, sweeps=0, map_sd=0.0, seed=1, origin=None):
+def survey(m, route, camera, mode, laps, step, sweeps=0, map_sd=0.0, seed=1, origin=None,
+           map_corr_m=0.0, size_error=0.0, **settings_kw):
+    """A corner-level survey; size_error: the printed markers are this much (relative)
+    smaller than the survey is told."""
     noise = sim.Noise(drift=0.01, yaw_drift_deg_per_m=0.3, map_sd=map_sd,
-                      map_sd_yaw_deg=1.0 if map_sd else 0.0, pixel_sd=0.3, seed=seed)
+                      map_sd_yaw_deg=1.0 if map_sd else 0.0, map_corr_m=map_corr_m,
+                      pixel_sd=0.3, seed=seed)
     frames = sim.make_frames(sim.route(route, laps=laps, step=step, sweeps=sweeps), noise)
-    settings = sim.settings_for(mode, m.marker_size, pose_sd=max(map_sd, 0.01))
-    sv = sim.simulate(m.poses(), m.sizes(), frames, camera, settings, mode, noise)
+    settings = sim.settings_for(mode, m.marker_size, pose_sd=max(map_sd, 0.01), **settings_kw)
+    printed = {k: v * (1.0 - size_error) for k, v in m.sizes().items()}
+    sv = sim.simulate(m.poses(), printed, frames, camera, settings, mode, noise)
     return finish(sv, fr.FrameSettings(mode, origin), m.dictionary, None, log=lambda *a: None)
 
 
@@ -130,13 +135,17 @@ def hall_route():
     return pts
 
 
-def test_uncertainty_tracks_the_real_error_in_a_long_hall():
+@pytest.mark.parametrize('size_error, size_sd', [(0.0, 0.0), (0.005, 0.005)])
+def test_uncertainty_tracks_the_real_error_in_a_long_hall(size_error, size_sd):
     """The 1-sigma follows the real error: the verdicts use the relative one (the map
     among itself), and the one in the origin marker's frame, larger far from the
-    origin, is reported beside it. The corner noise is measured, not assumed."""
+    origin, is reported beside it. The corner noise is measured, not assumed. With
+    the size exact and known to be, and with the markers printed 0.5 % small and
+    marker_size_sd 0.5 % (the size's error is in the frame's 1-sigma only: driving
+    again does not improve it)."""
     m = mm.load(os.path.join(os.path.dirname(__file__), 'fixtures', 'hall_marker_map.yaml'))
     res = survey(m, hall_route(), sim.forward_camera(), 'origin_marker', laps=1, step=0.1,
-                 sweeps=4, origin=20)
+                 sweeps=4, origin=20, size_error=size_error, marker_size_sd=size_sd)
     assert res['info']['pixel_noise_px'] == pytest.approx(0.3, rel=0.2)
     T = inv_T(fr.origin_marker_frame(m.pose_of(20), np.zeros(3), np.array([0, 0, 1.0])))
     truth = truth_map(m, T, '')
@@ -152,7 +161,30 @@ def test_uncertainty_tracks_the_real_error_in_a_long_hall():
     rel = np.linalg.norm((got @ rot_z(fit.x[0]).T + fit.x[1:] - want)[:, :2], axis=1)
     z_rel = rel / np.array([x.sd_xy for x in ms])
     z_frame = np.array([rows[x.id]['horiz'] / x.frame_sd_xy for x in ms if x.id != 20])
-    assert 0.3 < np.median(z_rel) < 2.0 and z_rel.max() < 4.0, z_rel
+    if not size_error:      # a wrong size stretches the map: not in the relative 1-sigma
+        assert 0.3 < np.median(z_rel) < 2.0 and z_rel.max() < 4.0, z_rel
     assert 0.3 < np.median(z_frame) < 2.0 and z_frame.max() < 4.0, z_frame
     assert max(x.frame_sd_xy for x in ms) > 2 * max(x.sd_xy for x in ms)
     assert res['report']['frame']['frame_sd_xy_max_cm'] > 0
+
+
+@pytest.mark.parametrize('map_corr_m', [0.0, 5.0])
+def test_the_frame_uncertainty_of_an_aligned_survey_holds_the_track_and_the_size(
+        office, map_corr_m):
+    """align_to_track with a reference track whose 6 cm error is independent per frame
+    or holds over 5 m, and markers printed 0.7 % smaller than the survey is told: the
+    1-sigma in the frame covers the real error (horizontal and height), with the
+    track's alignment (the residuals' correlation) and marker_size_sd (0.5 %) in it.
+    Without those terms the heights were off by 4 to 6 sigma."""
+    m, route = office
+    res = survey(m, route, sim.upward_camera(), 'align_to_track', laps=2, step=0.1, map_sd=0.06,
+                 map_corr_m=map_corr_m, size_error=0.007)
+    rows, _ = errors(res, m)
+    ms = res['markers']
+    xy = np.array([rows[x.id]['horiz'] / x.frame_sd_xy for x in ms])
+    z = np.array([abs(rows[x.id]['dz']) / x.frame_sd_z for x in ms])
+    assert np.sqrt(np.mean(xy ** 2) / 2) < 1.5 and xy.max() < 3.5, xy
+    assert 0.5 < np.sqrt(np.mean(z ** 2)) < 2.0 and z.max() < 3.0, z
+    f = res['frame']
+    assert 1 <= f['fit_samples'] < f['fit_points'] and f['fit_sd_xy_cm'] > 0, f
+    assert all(x.verdict == 'good' for x in ms), [(x.id, x.flags) for x in ms]

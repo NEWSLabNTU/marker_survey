@@ -7,7 +7,9 @@ with a common shift and turn of the whole map taken out (what driving past
 it again improves, and what a robot localizing on the map feels). The same
 in the result frame, which adds the frame's own uncertainty (in
 origin_marker mode the origin marker's facing, turning far markers about
-it), is reported beside them as frame_sd_*; the verdict does not use it.
+it; in align_to_track the fit to the reference track) and the marker
+size's (marker_size_sd), is reported beside them as frame_sd_*; the verdict
+does not use it.
 
   good        nothing to do;
   pass again  usable, but seen too few times or too uncertain: drive past it
@@ -102,15 +104,15 @@ def surveyed_markers(markers_world: Dict[int, np.ndarray], stats: dict, T_target
         if C is None:
             C = Cf
         if C is not None:
-            sm.sd_xy, sm.sd_z, sm.sd_angle_deg = _sds(C)
+            sm.sd_xy, sm.sd_z, sm.sd_angle_deg = sds_of(C)
         if Cf is not None:
-            sm.frame_sd_xy, sm.frame_sd_z, _ = _sds(Cf)
+            sm.frame_sd_xy, sm.frame_sd_z, _ = sds_of(Cf)
         judge(sm, st_)
         out.append(sm)
     return out
 
 
-def _sds(C):
+def sds_of(C):
     """1-sigma (worst horizontal [m], height [m], worst rotation axis [deg]) of a 6x6
     covariance (rotation, translation)."""
     Ct = C[3:, 3:]

@@ -6,8 +6,10 @@ robot follows a route; every pose is a frame with
 - the true base pose in the site's map frame;
 - an odometry pose: the true relative motion with noise integrated along
   the drive, in an odometry frame that starts at the robot's first pose;
-- a localizer's map pose: the true pose with independent noise per frame
-  (a LiDAR localizer's jitter).
+- a localizer's map pose: the true pose with noise, independent per frame
+  (a LiDAR localizer's jitter) or, with map_corr_m, wandering slowly along
+  the drive (a localizer's error that holds over metres, as a real one's
+  does).
 
 The corner-level simulation projects the marker corners with Gaussian pixel
 noise (no image); render.py draws the images instead.
@@ -107,6 +109,7 @@ class Noise:
     yaw_drift_deg_per_m: float = 0.3
     map_sd: float = 0.0              # [m] localizer noise per horizontal axis
     map_sd_yaw_deg: float = 0.0
+    map_corr_m: float = 0.0          # [m] correlation length of that noise along the drive; 0: white
     pixel_sd: float = 0.5
     seed: int = 1
 
@@ -116,6 +119,7 @@ def make_frames(base_poses: List[np.ndarray], noise: Noise, rate: float = 10.0) 
     rng_m = np.random.default_rng(noise.seed + 1000)
     T_odo = np.eye(4)
     out = []
+    z = rng_m.normal(0, 1, 3) if noise.map_corr_m > 0 else None   # correlated map noise, in sds
     for k, Tb in enumerate(base_poses):
         if k > 0:
             rel = inv_T(base_poses[k - 1]) @ Tb
@@ -124,10 +128,17 @@ def make_frames(base_poses: List[np.ndarray], noise: Noise, rate: float = 10.0) 
             nr = rng_o.normal(0, math.radians(noise.yaw_drift_deg_per_m) * d + 1e-5, 3) \
                 * np.array([0.2, 0.2, 1.0])
             T_odo = T_odo @ make_T(rel[:3, :3] @ rotvec_to_matrix(nr), rel[:3, 3] + nt)
-        e = make_T(rot_z(math.radians(rng_m.normal(0, noise.map_sd_yaw_deg))) if noise.map_sd_yaw_deg
-                   else np.eye(3),
-                   [rng_m.normal(0, noise.map_sd), rng_m.normal(0, noise.map_sd), 0.0]
-                   if noise.map_sd else [0.0, 0.0, 0.0])
+        if noise.map_corr_m > 0:            # Ornstein-Uhlenbeck along the distance driven
+            if k > 0:
+                a = math.exp(-d / noise.map_corr_m)
+                z = a * z + math.sqrt(1.0 - a * a) * rng_m.normal(0, 1, 3)
+            e = make_T(rot_z(math.radians(z[2] * noise.map_sd_yaw_deg)),
+                       [z[0] * noise.map_sd, z[1] * noise.map_sd, 0.0])
+        else:
+            e = make_T(rot_z(math.radians(rng_m.normal(0, noise.map_sd_yaw_deg)))
+                       if noise.map_sd_yaw_deg else np.eye(3),
+                       [rng_m.normal(0, noise.map_sd), rng_m.normal(0, noise.map_sd), 0.0]
+                       if noise.map_sd else [0.0, 0.0, 0.0])
         out.append(Frame(k / rate, Tb, T_odo.copy(), Tb @ e))
     return out
 

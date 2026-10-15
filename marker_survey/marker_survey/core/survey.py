@@ -19,7 +19,9 @@ frames in which the markers are seen apart. The survey:
      in the frame;
   4. gives the joint covariance of the markers and of the floor (the mean of
      the base poses, which the result frame stands on), with the corner noise
-     measured from the solve's own reprojection residuals rather than assumed.
+     measured from the solve's own reprojection residuals rather than assumed,
+     and the printed size's own uncertainty (marker_size_sd: a size error
+     scales every marker's distance from the camera, the same way for all).
 
 Choosing the frame the result is expressed in is frames.py's job; writing
 it, solve.py's.
@@ -75,6 +77,9 @@ class SurveySettings:
     pixel_sd: float = 0.5              # [px] corner noise the solve weights the corners by
     # [px] the covariance uses the corner noise measured in the solve, at least this
     min_pixel_sd: float = 0.05
+    # relative sd of the marker size, common to all markers (a printer's scale, a
+    # tape measure): 0.005 is 0.5 %, 2 mm on 0.45 m; 0: the size is exact
+    marker_size_sd: float = 0.005
     huber_px: float = 1.5              # robust loss scale, in pixel sds
     # scipy least_squares loss. soft_l1 is Huber-like but keeps far-off residuals in the
     # Jacobian; with 'huber' they drop out of it, the start keyframe's constraint can
@@ -95,8 +100,14 @@ class Survey:
         self.markers: Dict[int, MarkerEstimate] = {}
         self.T_cam_base: Optional[np.ndarray] = None    # camera optical frame -> base frame
         # (marker ids, joint covariance) of the last solve: 6 per marker (rotation vector,
-        # translation), then 6 for the floor if T_cam_base is known (FLOOR_PARAMS)
+        # translation), then 6 for the floor if T_cam_base is known (FLOOR_PARAMS), then,
+        # with align_gauge, 6 for the trajectory's own placement (ALIGN_PARAMS)
         self.joint_cov = None
+        self.joint_rows = []            # the names of the blocks after the markers
+        # the solution's shift (as joint_cov's rows) for each quantity the solve holds
+        # fixed, by its sd (the marker size): fully correlated, not in joint_cov
+        self.joint_bias = []
+        self.align_centroid = None      # align_gauge: the centroid of the fitted base positions
 
     def wants_keyframe(self, T_world_cam: np.ndarray, detections: List[Detection]) -> bool:
         if not detections:
@@ -152,9 +163,14 @@ class Survey:
                     self._update_live(d, kf.T_world_cam @ T_cm, [])
 
     # -------------------------------------------------------------- the solve
-    def solve(self, max_nfev: int = 300):
+    def solve(self, max_nfev: int = 300, align_gauge: bool = False):
         """Bundle adjustment. Returns (markers {id: T_world_marker}, keyframe poses
-        T_world_cam, per-marker stats {id: dict}, info) in the pose source's frame."""
+        T_world_cam, per-marker stats {id: dict}, info) in the pose source's frame.
+
+        align_gauge: the joint covariance also holds the rigid motion that fits the
+        keyframes with a reference pose (align_to_track) back onto where they were
+        solved, so that the markers' covariance can be taken relative to the
+        trajectory as a whole rather than to its first keyframe."""
         from scipy.optimize import least_squares
         from scipy.sparse import lil_matrix
         from scipy.spatial.transform import Rotation
@@ -213,9 +229,10 @@ class Survey:
             Rm = Rotation.from_rotvec(mp[:, :3]).as_matrix()
             return Rk, tk, Rm, mp[:, 3:]
 
-        def residuals(x):
+        def residuals(x, scale=1.0):
             Rk, tk, Rm, tm = unpack(x)
-            Xw = np.einsum('nij,ncj->nci', Rm[o_m], obj_m[o_m]) + tm[o_m][:, None, :]   # n x 4 x 3
+            obj = obj_m[o_m] * scale
+            Xw = np.einsum('nij,ncj->nci', Rm[o_m], obj) + tm[o_m][:, None, :]   # n x 4 x 3
             Xc = np.einsum('nji,ncj->nci', Rk[o_k], Xw - tk[o_k][:, None, :])        # R^T (X - t)
             z = np.maximum(Xc[..., 2], 1e-3)
             u = fx * Xc[..., 0] / z + cx
@@ -290,7 +307,29 @@ class Survey:
         Fk = None
         if self.T_cam_base is not None:
             Fk = floor_jacobian(x[:6 * nkp].reshape(-1, 6), self.T_cam_base, nk)
-        joint = marker_covariances(jac, 6 * nkp, nm, extra, Fk)
+        self.joint_rows = [] if Fk is None else ['floor']
+        self.align_centroid = None
+        refs = [kf.T_ref_base is not None for kf in kfs]
+        if align_gauge and self.T_cam_base is not None and sum(refs) >= 3:
+            Fa, self.align_centroid = align_jacobian(x[:6 * nkp].reshape(-1, 6), self.T_cam_base,
+                                                     T0, k_off, refs)
+            Fk = Fa if Fk is None else np.vstack([Fk, Fa])
+            self.joint_rows.append('align')
+        bias = None
+        if s.marker_size_sd > 0:
+            # what a size wrong by marker_size_sd does to the solution (the solve takes
+            # the size as given, so a wrong one moves every marker, mostly along its
+            # distance from the camera, the same way): its effect, added to the covariance
+            eps = 1e-6
+            js = (residuals(x, 1.0 + eps) - r) / eps * w
+            if s.loss == 'soft_l1':     # weighted as least_squares weighs sol.jac's rows
+                js *= (1.0 + (r / s.huber_px) ** 2) ** -0.25
+            bias = [(js, s.marker_size_sd)]
+        joint = marker_covariances(jac, 6 * nkp, nm, extra, Fk, bias)
+        if isinstance(joint, tuple):
+            joint, self.joint_bias = joint
+        else:
+            self.joint_bias = []
         self.joint_cov = (ids, joint)
         stats = {}
         for mid in ids:
@@ -308,6 +347,7 @@ class Survey:
 
 
 FLOOR_PARAMS = 6      # the floor in the joint covariance: mean base z axis, mean base origin
+ALIGN_PARAMS = 6      # the trajectory's placement: rotation vector, translation about a centroid
 
 
 def floor_vector(T_world_base) -> np.ndarray:
@@ -336,14 +376,55 @@ def floor_jacobian(kp: np.ndarray, T_cam_base: np.ndarray, nk: int, eps: float =
     return F
 
 
-def marker_covariances(jac, off: int, nm: int, extra_diag=None, Fk=None):
+def align_jacobian(kp: np.ndarray, T_cam_base: np.ndarray, T0: np.ndarray, k_off: int,
+                   has_ref, eps: float = 1e-6):
+    """The rigid motion (ALIGN_PARAMS: rotation vector, translation about the centroid of
+    the base positions) that best fits the base positions of the keyframes with a
+    reference pose onto their positions after a change of the keyframe parameters: d
+    motion / d keyframe parameters (ALIGN_PARAMS x 6 len(kp)), and the centroid. `kp`
+    are the free keyframes' camera poses (rotation vector, translation); with k_off 1
+    the first keyframe is fixed at T0."""
+    from scipy.spatial.transform import Rotation
+    tc = T_cam_base[:3, 3]
+    n = len(kp)
+    R = Rotation.from_rotvec(kp[:, :3]).as_matrix()
+    b = R @ tc + kp[:, 3:]                                  # base positions of the free ones
+    if k_off:
+        b = np.vstack([T0[:3, :3] @ tc + T0[:3, 3], b])
+    sel = [k for k, h in enumerate(has_ref) if h]
+    c = b[sel].mean(axis=0)
+    A = np.zeros((3 * len(sel), 6))
+    for r, k in enumerate(sel):
+        v = b[k] - c
+        A[3 * r:3 * r + 3, :3] = -np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+        A[3 * r:3 * r + 3, 3:] = np.eye(3)
+    P = np.linalg.pinv(A)                                   # 6 x 3 len(sel)
+    # d base position / d keyframe parameters, per free keyframe (3 x 6)
+    dR = np.zeros((n, 3, 3))
+    for j in range(3):
+        d = kp[:, :3].copy()
+        d[:, j] += eps
+        dR[:, :, j] = (Rotation.from_rotvec(d).as_matrix() @ tc - R @ tc) / eps
+    F = np.zeros((ALIGN_PARAMS, 6 * n))
+    for r, k in enumerate(sel):
+        j = k - k_off
+        if j < 0:
+            continue
+        F[:, 6 * j:6 * j + 3] += P[:, 3 * r:3 * r + 3] @ dR[j]
+        F[:, 6 * j + 3:6 * j + 6] += P[:, 3 * r:3 * r + 3]
+    return F, c
+
+
+def marker_covariances(jac, off: int, nm: int, extra_diag=None, Fk=None, bias=None):
     """Joint covariance (6 nm x 6 nm; per marker rotvec then translation) of all markers,
     from the Gauss-Newton normal matrix J^T J (plus `extra_diag`, information added
     on the diagonal); None if it is singular. The markers' parameters come last
     (from `off`); the keyframes are eliminated (Schur complement), which keeps the
     sparse factorisation small: the keyframe block is banded. With `Fk` (q x off),
     linear functions of the keyframe parameters (the floor), their q rows and columns
-    follow the markers'."""
+    follow the markers'. `bias`: [(d residuals / d c, sd of c)] for quantities c the
+    solve holds fixed (the marker size): then (covariance, [the solution's shift, as
+    the covariance's rows, for a change of c by its sd])."""
     from scipy.sparse import csc_matrix, diags
     from scipy.sparse.linalg import splu
     J = csc_matrix(jac)
@@ -366,8 +447,19 @@ def marker_covariances(jac, off: int, nm: int, extra_diag=None, Fk=None):
             Cfm = -FX @ C
             Cff = Fk @ lu.solve(np.ascontiguousarray(Fk.T)) + FX @ C @ FX.T
             C = np.block([[C, Cfm.T], [Cfm, Cff]])
+        shifts = []
+        for b, sd in bias or []:
+            # the shift: solve A d = -J^T b, by the same elimination
+            g = -(J.T @ b)
+            gk, gm = g[:off], g[off:]
+            dm = np.linalg.solve(S, gm - (Akm.T @ lu.solve(gk) if off > 0 else 0.0))
+            v = dm
+            if Fk is not None and off > 0:
+                v = np.concatenate([dm, Fk @ lu.solve(gk - Akm @ dm)])
+            shifts.append(sd * v)
     except (RuntimeError, np.linalg.LinAlgError):          # singular
         return None
     if not np.all(np.isfinite(C)):
         return None
-    return 0.5 * (C + C.T)
+    C = 0.5 * (C + C.T)
+    return C if bias is None else (C, [v for v in shifts if np.all(np.isfinite(v))])

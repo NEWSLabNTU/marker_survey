@@ -2,6 +2,7 @@
 
     marker_survey_solve OUT/survey_data.npz [--output-dir DIR] [--frame-mode MODE]
                         [--origin-marker ID] [--floor-offset M] [--odom-drift X]
+                        [--marker-size M] [--marker-size-sd X]
 
 Without --output-dir it prints the result only. The frame settings default
 to the ones the recording was made with.
@@ -21,11 +22,21 @@ def main(argv=None):
     ap.add_argument('--frame-id', help='frame name written to the map')
     ap.add_argument('--floor-offset', type=float, help='metres the floor lies below the base frame')
     ap.add_argument('--odom-drift', type=float, help='odometry drift, sd per metre')
+    ap.add_argument('--marker-size', type=float,
+                    help='[m] the black square measured again: solve with it instead of the '
+                         "recording's (per-marker sizes stay)")
+    ap.add_argument('--marker-size-sd', type=float,
+                    help='relative sd of the marker size, for the uncertainty (0.005: 0.5 %%)')
     ap.add_argument('--max-nfev', type=int, default=300, help='solver iteration cap')
     args = ap.parse_args(argv)
     sv, dictionary, frame = load_dump(args.dump)
     if args.odom_drift is not None:
         sv.s.odom_drift = args.odom_drift
+    if args.marker_size is not None:
+        sv.s.marker_size = args.marker_size
+        sv.rebuild_live()
+    if args.marker_size_sd is not None:
+        sv.s.marker_size_sd = args.marker_size_sd
     if args.frame_mode:
         frame.mode = args.frame_mode
         sv.s.pose_priors = frame.mode == 'pose_frame'

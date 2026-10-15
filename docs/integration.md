@@ -91,6 +91,7 @@ the ones marked with an argument of the same name, `frame.mode` as
 | `dictionary` | `DICT_5X5_1000` | yes | the printed family: an OpenCV `DICT_*` name or `tag16h5`, `tag25h9`, `tag36h10`, `tag36h11`, `aruco_mip_36h12`, `aruco_original` |
 | `marker_size` | 0.38 | yes | [m] edge of the black square, not the sheet; a wrong size scales every distance |
 | `marker_sizes` | `['']` | | per-marker sizes, `["12:0.30", "13:0.30"]` |
+| `marker_size_sd` | 0.005 | | relative 1-sigma of the size, common to all markers (a printer's scale, the tape): 0.005 is 0.5 %, 2 mm on 0.45 m; in the report's `frame_sd_*` only; 0: exact. `marker_survey_solve --marker-size-sd` sets it again |
 | `image_topic` | `/camera/image` | yes | |
 | `camera_info_topic` | `/camera/camera_info` | yes | |
 | `compressed` | false | yes | subscribe to `image_topic/compressed` |
@@ -283,12 +284,19 @@ as published and ignore the entries with variance 1000 in planar mode.
 6. **The survey's result.** `survey_report.yaml`: per marker the views,
    reprojection RMS, 1-sigma position, height and angle (relative to the
    other markers), and a verdict; drive past the markers marked
-   `pass again` once more, closer, and save again. `frame_sd_xy_cm` is the
-   1-sigma in the result frame; in `origin_marker` mode it grows with the
-   distance from the origin marker, and passing the origin marker from
-   more places, or choosing one in the middle of the site, shrinks it. `marker_survey_compare` compares the map with a tape survey of a
+   `pass again` once more, closer, and save again. `frame_sd_xy_cm` and
+   `frame_sd_z_cm` are the 1-sigma in the result frame; in `origin_marker`
+   mode it grows with the distance from the origin marker, and passing the
+   origin marker from more places, or choosing one in the middle of the
+   site, shrinks it. It holds the marker size's uncertainty
+   (`marker_size_sd`): heights all off by the same centimetre or two mean a
+   size measured wrong, and measuring the black square again and solving
+   the recording again with it (`marker_survey_solve survey_data.npz
+   --marker-size M --output-dir ...`) fixes them. `marker_survey_compare` compares the map with a tape survey of a
    few markers; in `align_to_track` the report's `frame.fit_rms_m` should be
-   about the localizer's own noise.
+   about the localizer's own noise, and `frame.fit_sd_xy_cm` is how well the
+   fit placed the survey on it (a localizer whose error holds over metres
+   places it less well than its RMS over the number of keyframes).
 7. **The localizer.** A status line every 10 s: images, fixes, rejected,
    priors, and the detection and fit time per frame. Drive a loop with
    the debug image open and the estimator's pose in RViz: fixes should

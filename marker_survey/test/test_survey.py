@@ -1,4 +1,5 @@
 import math
+import os
 
 import numpy as np
 import pytest
@@ -128,6 +129,7 @@ def test_dump_round_trip_solves_the_same(result, tmp_path):
     save_dump(str(p), sv, 'DICT_5X5_1000', FrameSettings('origin_marker', 24))
     sv2, dic, frame = load_dump(str(p))
     assert (dic, frame.mode, frame.origin_marker) == ('DICT_5X5_1000', 'origin_marker', 24)
+    assert sv2.s.marker_size_sd == sv.s.marker_size_sd
     res2 = finish(sv2, frame, dic, None, log=quiet)
     a = {m.id: m.T[:3, 3] for m in res['markers']}
     b = {m.id: m.T[:3, 3] for m in res2['markers']}
@@ -307,3 +309,95 @@ def test_a_lost_odometry_message_does_not_lose_the_frame():
     del ts[5:12], Ts[5:12]                               # a long gap
     assert pose_at_stamp(ts, Ts, 8.0 / 9.0, 0.1, 0.5) is None
     assert pose_at_stamp([], [], 1.0, 0.1, 0.5) is None
+
+
+def test_correlation_time_counts_independent_samples():
+    from marker_survey.core.frames import correlation_time
+    rng = np.random.default_rng(3)
+    assert correlation_time(rng.normal(size=4000)) == pytest.approx(1.0, abs=0.3)
+    x = np.zeros(4000)
+    for k in range(1, len(x)):                  # AR(1), rho 0.9: (1 + rho) / (1 - rho) = 19
+        x[k] = 0.9 * x[k - 1] + rng.normal()
+    assert correlation_time(x) == pytest.approx(19.0, rel=0.3)
+    assert correlation_time(np.ones(10)) == 1.0
+
+
+def test_the_alignment_covariance_does_not_shrink_with_correlated_residuals():
+    """The fit's 1-sigma for a track error that is independent per keyframe falls as
+    1 / sqrt(N); for the same error held over long stretches it stays near the error."""
+    from marker_survey.core.frames import align_to_track, alignment_covariance
+    from marker_survey.core.se3 import make_T, rot_z
+    rng = np.random.default_rng(4)
+    n = 600
+    a = np.linspace(0, 4 * np.pi, n)
+    base = [make_T(rot_z(t), [4 * np.cos(t), 2 * np.sin(t), 0.0]) for t in a]
+    white = rng.normal(0, 0.05, (n, 2))
+    slow = np.zeros((n, 2))
+    for k in range(1, n):
+        slow[k] = 0.99 * slow[k - 1] + math.sqrt(1 - 0.99 ** 2) * rng.normal(0, 0.05, 2)
+    sds = {}
+    for name, e in (('white', white), ('slow', slow)):
+        refs = [T.copy() for T in base]
+        for T, d in zip(refs, e):
+            T[:2, 3] += d
+        T_tw, res = align_to_track(base, refs)
+        C, c, n_eff = alignment_covariance(base, refs, T_tw)
+        assert C.shape == (6, 6) and np.allclose(C, C.T)
+        sds[name] = (math.sqrt(C[3, 3]), n_eff)
+    assert sds['white'][1] > 300 and sds['white'][0] < 0.005, sds
+    assert sds['slow'][1] < 30 and sds['slow'][0] > 0.01, sds
+
+
+def test_marker_size_sd_widens_the_frame_uncertainty_only():
+    """marker_size_sd adds the size's error to the 1-sigma in the frame (mostly the
+    distance from the camera: the height of a ceiling marker), not to the relative one
+    the verdicts use."""
+    m = mm.load(os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'ceiling', 'sites',
+                             'office', 'marker_map.yaml'))
+    route = [(-4.0, -2.0), (4.0, -2.0), (4.0, 2.0), (-4.0, 2.0)]
+    noise = sim.Noise(pixel_sd=0.3, seed=2)
+    frames = sim.make_frames(sim.route(route, laps=1, step=0.1), noise)
+    out = {}
+    for sd in (0.0, 0.01):
+        s = sim.settings_for('origin_marker', m.marker_size, marker_size_sd=sd)
+        sv = sim.simulate(m.poses(), m.sizes(), frames, sim.upward_camera(), s, 'origin_marker', noise)
+        res = finish(sv, FrameSettings('origin_marker', 5), m.dictionary, None, log=lambda *a: None)
+        out[sd] = {x.id: x for x in res['markers']}
+    for mid, x in out[0.01].items():
+        x0 = out[0.0][mid]
+        assert x.sd_xy == pytest.approx(x0.sd_xy) and x.sd_z == pytest.approx(x0.sd_z)
+        assert x.verdict == x0.verdict
+        if mid != 5:
+            # 1 % of the 2.7 m from the camera, in height
+            assert x.frame_sd_z ** 2 - x0.frame_sd_z ** 2 > 0.01 ** 2, (mid, x.frame_sd_z)
+
+
+def test_the_solve_tool_takes_marker_size_sd(result, tmp_path):
+    from marker_survey.tools import solve as solve_tool
+    _, sv, _ = result
+    p = tmp_path / 'survey_data.npz'
+    save_dump(str(p), sv, 'DICT_5X5_1000', FrameSettings('origin_marker', 24))
+    sds = []
+    for x in ('0', '0.02'):
+        out = tmp_path / x
+        assert solve_tool.main([str(p), '--output-dir', str(out), '--marker-size-sd', x]) == 0
+        rep = yaml.safe_load((out / 'survey_report.yaml').read_text())
+        sds.append(max(m['frame_sd_xy_cm'] for m in rep['markers']))
+    assert sds[1] > sds[0], sds
+
+
+def test_the_solve_tool_solves_again_with_a_measured_size(result, tmp_path):
+    """--marker-size: the same recording solved with a size 1 % larger puts every
+    board about 1 % farther from the camera."""
+    from marker_survey.tools import solve as solve_tool
+    _, sv, res = result
+    p = tmp_path / 'survey_data.npz'
+    save_dump(str(p), sv, 'DICT_5X5_1000', FrameSettings('origin_marker', 24))
+    size = sv.s.marker_size * 1.01
+    out = tmp_path / 'out'
+    assert solve_tool.main([str(p), '--output-dir', str(out), '--marker-size', str(size)]) == 0
+    got = mm.load(str(out / 'marker_map.yaml'))
+    assert got.marker_size == pytest.approx(size)
+    a = {m.id: m.T[:3, 3] for m in res['markers']}
+    moved = [np.linalg.norm(got.pose_of(k)[:3, 3] - a[k]) for k in a]
+    assert max(moved) > 0.005, moved

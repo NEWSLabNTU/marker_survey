@@ -83,3 +83,66 @@ def align_to_track(T_world_base: List[np.ndarray], T_ref_base: List[Optional[np.
     T, _ = umeyama(src, dst)
     res = np.linalg.norm(src @ T[:3, :3].T + T[:3, 3] - dst, axis=1)
     return T, res
+
+
+def correlation_time(x: np.ndarray) -> float:
+    """Integrated autocorrelation time of a series (1 for independent samples, about
+    2 L / step for errors that hold over a length L), by Geyer's initial positive
+    sequence: autocorrelations summed in pairs while the pairs stay positive."""
+    x = np.asarray(x, float) - np.mean(x)
+    n = len(x)
+    v = float(x @ x) / n
+    if n < 4 or v <= 0:
+        return 1.0
+    f = np.fft.rfft(x, 2 * n)
+    acf = np.fft.irfft(f * np.conj(f))[:n] / (n * v)
+    tau = -1.0
+    for k in range(0, n - 1, 2):
+        pair = acf[k] + acf[k + 1]
+        if pair <= 0:
+            break
+        tau += 2.0 * pair
+    return float(min(max(tau, 1.0), n))
+
+
+def alignment_covariance(T_world_base: List[np.ndarray], T_ref_base: List[Optional[np.ndarray]],
+                         T_target_world: np.ndarray, n_eff: Optional[float] = None):
+    """How well align_to_track placed the survey in the reference frame: the 6 x 6
+    covariance (rotation vector, translation; target frame) of the fitted transform,
+    about the reference positions' centroid; the centroid; and the number of
+    independent samples the residuals held.
+
+    The fit's residuals (the reference track's error, and what is left of the
+    odometry's) are not independent from keyframe to keyframe: a localizer's error
+    holds over metres. Their correlation along the track, measured from the residuals
+    themselves (correlation_time), divides the number of keyframes into a number of
+    independent samples (n_eff, at least 1, unless given), and the covariance is the
+    least-squares one for that many samples of the residuals' spread. Errors that
+    hold over the whole drive count once: they do not shrink with more keyframes."""
+    pairs = [(a[:3, 3], b[:3, 3]) for a, b in zip(T_world_base, T_ref_base) if b is not None]
+    src = np.array([p[0] for p in pairs])
+    dst = np.array([p[1] for p in pairs])
+    R, t = T_target_world[:3, :3], T_target_world[:3, 3]
+    q = src @ R.T + t
+    e = dst - q
+    n = len(e)
+    c = dst.mean(axis=0)
+    d = q - c
+    if n_eff is None:
+        taus = [correlation_time(e[:, j]) for j in range(3) if np.std(e[:, j]) > 1e-6]
+        n_eff = n / max(taus) if taus else float(n)
+    n_eff = float(min(max(n_eff, 1.0), n))
+    var = np.maximum(np.mean(e ** 2, axis=0) * n / max(n - 6, 1), 1e-12)   # per axis
+    A = np.zeros((3 * n, 6))
+    W = np.tile(1.0 / var, n)
+    for k in range(n):
+        A[3 * k:3 * k + 3, :3] = -np.array([[0, -d[k, 2], d[k, 1]],
+                                            [d[k, 2], 0, -d[k, 0]],
+                                            [-d[k, 1], d[k, 0], 0]])
+        A[3 * k:3 * k + 3, 3:] = np.eye(3)
+    N = (A.T * W) @ A
+    try:
+        C = np.linalg.inv(N) * (n / n_eff)
+    except np.linalg.LinAlgError:
+        C = np.linalg.pinv(N) * (n / n_eff)
+    return 0.5 * (C + C.T), c, n_eff

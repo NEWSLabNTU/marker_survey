@@ -102,9 +102,15 @@ course and a ceiling, through their own launch files the same way.
      `bad`). The 1-sigma values are relative: how well the marker sits among
      the others, with a common shift and turn of the whole map taken out;
      the verdicts use them. `frame_sd_xy_cm` and `frame_sd_z_cm` are the
-     same in the result frame, which in `origin_marker` mode adds the origin
-     marker's facing (far markers turn with it). The corner noise behind
-     both is measured from the solve (`solve.pixel_noise_px`), not assumed;
+     same in the result frame, which adds what the frame's definition
+     leaves open: in `origin_marker` mode the origin marker's facing (far
+     markers turn with it), in `align_to_track` how well the fit placed the
+     survey on the reference track; and in every mode the marker size's own
+     uncertainty, `marker_size_sd` (0.5 % by default: a size off by that
+     moves a ceiling marker 3 m up by about 1.4 cm in height, and stretches
+     a long site; not in the relative values, since driving again does not
+     improve it). The corner noise behind both is measured from the solve
+     (`solve.pixel_noise_px`), not assumed;
    - `survey_data.npz`: the recording, to solve again without the robot:
      `ros2 run marker_survey marker_survey_solve my_site/survey_data.npz --output-dir my_site`.
 
@@ -123,7 +129,12 @@ The floor normal (z up) comes from the `base_frame` poses in every mode, so
 an upward camera needs nothing special; `floor_offset` moves the floor below
 `base_frame` (a vehicle on a stand). In `align_to_track` the report gives
 the fit's residual (`frame.fit_rms_m`, `fit_max_m`): about the localizer's
-own noise when all is well.
+own noise when all is well. A localizer's error holds over metres, so the
+residuals are not independent from keyframe to keyframe: their correlation
+along the track gives how many independent samples they amount to
+(`frame.fit_samples`), and the fit's 1-sigma follows from that
+(`frame.fit_sd_xy_cm`, `fit_sd_yaw_deg`, in every marker's `frame_sd_*`).
+An error that holds over the whole drive does not average out.
 
 ### Pose sources
 

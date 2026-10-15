@@ -6,6 +6,35 @@ its own `version` (now 1); the loader keeps reading older versions.
 
 ## Unreleased
 
+### Survey uncertainty
+
+- `align_to_track`: the 1-sigma in the result frame (`frame_sd_xy_cm`,
+  `frame_sd_z_cm`) now holds how well the fit placed the survey on the
+  reference track. The fit's residuals are taken as correlated along the
+  track (a localizer's error holds over metres): their autocorrelation
+  gives the number of independent samples (`frame.fit_samples` in the
+  report), so an error that holds over the whole drive does not shrink
+  with more keyframes. The markers' own part is now relative to the
+  solved trajectory as a whole, no longer to its first keyframe (a marker
+  seen from the start had a 1-sigma near zero). New report fields
+  `frame.fit_samples`, `frame.fit_sd_xy_cm`, `frame.fit_sd_yaw_deg`.
+- Survey parameter `marker_size_sd` (0.005, relative, common to all
+  markers): the size's own uncertainty, in the frame's 1-sigma in every
+  mode (a size off by 0.5 % moves a ceiling marker 3 m up by about 1.4 cm
+  in height, and stretches a long site). Not in the relative 1-sigma, so
+  the verdicts are unchanged. Stored in `survey_data.npz`;
+  `marker_survey_solve --marker-size-sd` sets it again, and
+  `marker_survey_solve --marker-size` solves a recording again with the
+  black square measured again.
+- On a robot project's simulated recording (ceiling markers, a 0.7 % size
+  error, a track residual of 6.7 cm RMS) the real error was 3 times the
+  frame's 1-sigma horizontally (median; up to 98 times) and 4 times in
+  height (up to 25); now 1.4 (up to 2.0) and 1.5 (up to 2.1).
+- `core/simulate.py`: `Noise.map_corr_m`, a localizer's error that holds
+  over that many metres (the default 0 keeps it independent per frame).
+- The log line of the origin marker's facing compares the frame's
+  1-sigma with the size taken as exact.
+
 ### Localizer
 
 - Parameter and launch argument `gate_sigmas` (3.0): the gate widens to

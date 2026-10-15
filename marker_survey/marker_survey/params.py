@@ -64,7 +64,10 @@ class SurveyParams:
             keyframe_distance=float(get('keyframe_distance')),
             keyframe_angle=math.radians(float(get('keyframe_angle_deg'))),
             odom_drift=float(get('odom_drift')), min_marker_px=float(get('min_marker_px')),
-            pose_sd=float(get('pose_sd')), pose_sd_rot=math.radians(float(get('pose_sd_deg'))))
+            pose_sd=float(get('pose_sd')), pose_sd_rot=math.radians(float(get('pose_sd_deg'))),
+            marker_size_sd=float(get('marker_size_sd')))
+        if not self.settings.marker_size_sd >= 0:
+            raise ValueError('marker_size_sd must be 0 or positive: the relative sd of the size')
         if self.frame.mode == 'pose_frame':
             # a map pose jitters frame to frame: absolute priors, not its relative motion
             self.settings.motion_factors = bool(get('pose_frame_motion'))
@@ -84,6 +87,7 @@ PARAMETERS = {
     'dictionary': 'DICT_5X5_1000',
     'marker_size': 0.38,
     'marker_sizes': [''],
+    'marker_size_sd': 0.005,
     'image_topic': '/camera/image',
     'camera_info_topic': '/camera/camera_info',
     'compressed': False,
