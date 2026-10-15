@@ -22,11 +22,12 @@ Status: phases 0 to 3 of [ROADMAP.md](ROADMAP.md) are done: the survey for
 wall boards and ceiling markers, in three frame modes, the marker map file,
 the localizer in both modes, the tools and CI. Of phase 4, the integration
 guide, [docs/integration.md](docs/integration.md), and the two examples
-that run in CI are done; the 0.1.0 tag and the move of the source projects
-onto the packages are open. Printing and identifying markers from a browser
-are in. Timing on a
-Jetson-class board is open; the rest of the web interface comes next.
-Changes are in [CHANGELOG.md](CHANGELOG.md).
+that run in CI are done, and 0.1.0 is tagged; the move of the source
+projects onto the packages is open. Of phase 5, the web interface is in:
+printing and identifying markers, and on the robot surveying, checking and
+using the map from a browser, tested in Chromium on simulated recordings in
+CI; the usability session with a person new to the tools is open. Timing on
+a Jetson-class board is open. Changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Packages
 
@@ -34,7 +35,7 @@ Changes are in [CHANGELOG.md](CHANGELOG.md).
 |---|---|
 | `marker_survey` | `marker_survey.core` (detection, SE(3), the survey and its bundle adjustment, frames, the map file, the report, simulation and rendering; plain Python, no ROS), the survey node, command-line tools |
 | `marker_localizer` | `marker_localizer.core.localize` (the 3d and planar solvers, covariance, gate; no ROS), the localizer node, its evaluation and scoring tools |
-| `marker_survey_web` | the browser interface: printing marker sheets and identifying markers from a photo (the rest of phase 5 to come) |
+| `marker_survey_web` | the browser interface: printing marker sheets and identifying markers from a photo; on the robot (`marker_survey_web_node`), the survey, check and map screens over the survey and localizer nodes |
 
 ## Install
 
@@ -232,6 +233,27 @@ recording, plays it through the node and scores the fixes against the truth;
 `marker_localizer_evaluate` runs both modes and the source implementations'
 methods on the same frames without ROS.
 
+## From a browser, on the robot
+
+```bash
+ros2 launch marker_survey_web web.launch.xml map_path:=$PWD/sites/my_site/marker_map.yaml
+```
+
+beside the survey node (with `start_paused:=true`) and the localizer, or
+`examples/ceiling/launch/web.launch.xml site:=$PWD/sites/my_site` for all
+three; then open `http://<the robot's address>:8090/` on a laptop or a
+phone. **Survey**: choose where the map goes ("use the robot's map" or
+"start from marker N"), drive, and watch the camera with every marker
+outlined (green known, yellow new, red too small), the map from above and a
+light per marker with hints; save, read the report, and drive again past
+the markers marked "pass again" (the earlier solve is kept). **Check**: drive
+the routes and see each marker fix against the robot's own position, with a
+table of how often each marker agreed; a marker that moved is flagged.
+**Use the map**: write the survey's map where the localizer reads it, after
+a confirmation, keeping the previous version, and undo. No build step, no
+internet, no login (a trusted network, or the robot's own access control);
+details in [docs/integration.md](docs/integration.md#the-web-interface).
+
 ## Printing markers
 
 From a browser, on a laptop or the robot (no ROS needed for this part):
@@ -314,7 +336,8 @@ Each runs as `ros2 run marker_survey <command>` (the last three as
 | `marker_sheets` | print-ready PDF sheets of markers at an exact size (below) |
 | `marker_identify` | the marker IDs in a photo |
 
-`ros2 run marker_survey_web marker_survey_web` serves the browser interface.
+`ros2 run marker_survey_web marker_survey_web` serves the printing and identifying
+pages without ROS; `marker_survey_web_node` serves all the screens on the robot.
 
 ## Accuracy
 

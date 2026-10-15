@@ -84,16 +84,17 @@ previous version back.
 
 ## Tasks
 
-- [ ] Node, static files, JSON API, WebSocket (done: the HTTP server, static
-      files and JSON API for printing and identifying; still to come: the
-      WebSocket and the ROS side for the survey and check screens)
+- [x] Node, static files, JSON API, WebSocket
 - [x] Plan and print, pulled forward: `marker_sheets` and `marker_identify`
       on the command line, and the "Print markers" and "Identify a marker"
       pages (below)
-- [ ] Survey screens on top of the phase 2 node
-- [ ] Check screen on top of the phase 3 localizer
-- [ ] Map use, versions, undo, localizer reload
-- [ ] Browser test; usability session
+- [x] Survey screens on top of the phase 2 node
+- [x] Check screen on top of the phase 3 localizer
+- [x] Map use, versions, undo, localizer reload
+- [x] API tests against recorded survey data; browser test
+- [ ] Usability session
+- [ ] Place (step 2): the checklist per marker and photos of placed markers;
+      plan (step 1): routes drawn on a site map
 
 ## Printing and identifying, done ahead of the rest
 
@@ -119,3 +120,83 @@ previous version back.
 
 The usability session finishes a simulated site with no help on the
 software, only on the hardware.
+
+## Result
+
+Everything but the usability session and the place checklist is done: the
+node, the survey, check and map screens, the API tests and a browser test
+that runs in CI. The usability session needs a person new to the tools and
+is open, so the phase is not done yet.
+
+The browser test (`ci/web_browser.sh`, CI job `web-browser`) starts
+`examples/ceiling/launch/web.launch.xml` on simulated recordings of the
+office (9 ceiling tags of 0.45 m at 3 m, upward webcam 640 x 480, map pose
+noise 5 cm and 1 deg) and walks the steps in Chromium, playing a recording
+wherever a person would drive. The map in use at the start is an older
+survey in which marker 5 lies 30 cm from where it now hangs. The numbers
+are identical on Humble and Jazzy, in CI run 38695440466 and locally:
+
+| Step | What the page does | Result |
+|---|---|---|
+| survey, first 60 s of the drive | start "in the robot's map" (`align_to_track`), camera with detections, map from above, lights; a marker seen twice is "pass again" with a hint; save | 9 markers, all good |
+| survey, the rest (124 s) | "Drive again", save | 9 good, 384 keyframes; the first solve kept in `history/` with its recording |
+| check, the old map, one lap | fixes against the prior pose | 367 fixes; marker 5 flagged (0 % agreement, 29.9 cm), every other marker 83 to 100 % |
+| check, the map just surveyed (trial), one lap | the same | 387 fixes, 382 agree (99 %), median distance 5.9 cm (the prior's own noise), nothing flagged |
+| use | the change ("moved more than 2 cm: 5 (30.3 cm)"), write after a confirmation, undo, write again | the file is the survey's; the old one in `marker_map_versions/`; the localizer reloaded each time |
+
+Each `web-browser` job takes about 9 minutes, of which rendering the two
+drives is about 2 and playing them in real time about 6. The API tests
+(`test_robot_api.py` and the unit tests of the pieces) run in the
+`build-and-test` job: 167 tests on each distro, all passing.
+
+### Pieces
+
+- `marker_survey_web_node` (`node.py`, `ros_bridge.py`): rclpy, the HTTP
+  server in a thread; the survey node's and localizer's status topics, the
+  localizer's fix records, their services and parameters; camera frames as
+  JPEG at 5 Hz, subscribed only while a page shows them (the nodes draw the
+  debug image only while subscribed). `launch/web.launch.xml`.
+- `hub.py`: the screens' logic without ROS (state, survey actions, report,
+  map use, check), behind a five-method robot interface; `mapstore.py`: the
+  map in use, versions, undo, every file checked with the loader;
+  `websocket.py`: RFC 6455 on Python's HTTP server, no dependency.
+- The page: `robot.js` and the new panels of `index.html`, plain
+  JavaScript; tabs follow the address (`/#survey`, `/#check`, `/#use`), so a
+  robot project can link to a step or embed it. Without a robot
+  (`marker_survey_web`), the robot tabs stay hidden.
+- Survey node: `~/status`, `~/start`, `~/pause`, `~/reset`, `start_paused`,
+  `keep_history`, the frame chosen at run time; `core/live.py` the lights
+  and hints (before a solve: under 3 keyframes, or seen from places less
+  than 0.3 m apart, is "pass again"; after it, the report's verdict until
+  the marker gets new views).
+- Localizer node: `~/fixes`, `~/status`, `~/reload`, `marker_map` at run
+  time, a missing map waited for; `core/check.py` the fix records and the
+  per-marker agreement (a fix agrees within 15 cm and 5 deg of the prior; a
+  marker left out as an outlier, or in a fix that disagrees, disagrees;
+  flagged above 20 % of at least 5).
+- Tests: `test_live.py`, `test_check.py` (a marker moved 30 cm is flagged,
+  and only it), `test_mapstore.py`, `test_robot_api.py` (a survey recording,
+  `survey_data.npz`, played through a stand-in for the two nodes: start in
+  both frame modes, save, pass again with the first solve kept, use with
+  and without confirmation, undo, the check flagging a moved marker, the
+  WebSocket's state and camera frames only when asked); the browser test
+  above. `marker_survey_synthetic` gained `--split-at` and `--start-time` for
+  it.
+
+### Deviations, and why
+
+- **Check before use is a trial.** The check screen points the localizer
+  at the survey's own file (its `marker_map` parameter); nothing is written
+  until "Use the map". The phase plan put check before use without saying
+  which map the localizer reads meanwhile.
+- **The services are `std_srvs/Trigger` and the status is JSON in
+  `std_msgs/String`.** Custom messages would need a CMake package; every
+  package here is Python.
+- **Status timers run on wall time.** With `use_sim_time` the ROS clock
+  stands still until a recording plays, and the page would show nothing.
+  The survey's processing timer is unchanged.
+- **Playwright runs in CI,** installed with pip in the job (Chromium and its
+  libraries, about 1 minute); the page itself needs neither.
+- **No camera on the Use screen, no map editing.** Not asked for; a
+  surveyed marker that is wrong is surveyed again.
+

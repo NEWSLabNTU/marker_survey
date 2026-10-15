@@ -233,14 +233,14 @@
     box.replaceChildren();
     let first = true;
     for (const o of opts) {
-      const opt_label = el('label', 'choice frame');
+      const choice = el('label', 'choice frame');
       const r = el('input');
       r.type = 'radio';
       r.name = 'sv_frame';
       r.value = o.use;
       r.disabled = !o.available;
       if (o.available && first) { r.checked = true; first = false; }
-      opt_label.append(r, el('strong', '', o.label));
+      choice.append(r, el('strong', '', o.label));
       if (o.use === 'marker') {
         const n = el('input');
         n.type = 'number';
@@ -250,11 +250,11 @@
         n.placeholder = 'number';
         n.setAttribute('aria-label', 'marker number');
         n.addEventListener('focus', () => { r.checked = true; });
-        opt_label.append(n);
+        choice.append(n);
       }
       const t = el('small', '', o.available ? o.text : o.why);
       const wrap = el('div', 'option');
-      wrap.append(opt_label, t);
+      wrap.append(choice, t);
       box.append(wrap);
     }
     if (sv.frame && sv.frame.mode === 'origin_marker' && sv.frame.origin_marker !== null && $('sv_origin')) {
