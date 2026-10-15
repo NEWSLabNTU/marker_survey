@@ -86,3 +86,17 @@ def test_the_launch_file_passes_its_arguments_with_the_node_defaults():
         if args[arg] is not None and default not in ('', None):
             want = str(default).lower() if isinstance(default, bool) else str(default)
             assert args[arg] == want or float(args[arg]) == float(default), (name, args[arg], default)
+
+
+def test_pose_source_markers_links_keyframes_by_the_markers_only():
+    p = params(pose_source='markers', base_frame='', vertical='ceiling', floor_offset=1.0)
+    assert p.pose_source == 'markers'
+    assert not p.settings.motion_factors and not p.settings.pose_priors
+    assert p.frame.vertical == 'ceiling' and p.frame.floor_offset == 1.0
+    q = params(pose_source='markers', **{'frame.mode': 'pose_frame'})
+    assert not q.settings.pose_priors and q.frame.frame_id == 'map'
+
+
+def test_vertical_must_be_known():
+    with pytest.raises(ValueError, match='vertical'):
+        params(vertical='wall')

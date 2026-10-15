@@ -19,18 +19,20 @@
   <arg name="node_name" default="marker_survey" description="the node's name; its ~/ topics and services follow it"/>
   <arg name="dictionary" default="DICT_5X5_1000" description="the printed family: an OpenCV DICT_* name or tag36h11, tag25h9, ..."/>
   <arg name="marker_size" default="0.38" description="[m] edge of the BLACK SQUARE, not of the sheet: measure it"/>
+  <arg name="marker_size_sd" default="0.005" description="relative sd of the printed size (0.005: 0.5 %); lower when every board was measured"/>
   <arg name="frame_mode" default="origin_marker" description="origin_marker, pose_frame or align_to_track"/>
   <arg name="origin_marker" default="-1" description="origin_marker mode: the marker that defines the frame"/>
   <arg name="frame_id" default="map" description="origin_marker mode: the frame name written to the map"/>
   <arg name="reference_frame" default="map" description="align_to_track: TF frame of the reference trajectory"/>
-  <arg name="pose_source" default="odometry" description="odometry (nav_msgs/Odometry) or tf"/>
+  <arg name="pose_source" default="odometry" description="odometry (nav_msgs/Odometry), tf, or markers (the camera alone: each frame placed on the markers already mapped)"/>
   <arg name="odom_topic" default="/odom"/>
   <arg name="pose_frame" default="" description="pose_source tf: the frame of the camera poses (map, odom, ...)"/>
-  <arg name="base_frame" default="base_link"/>
+  <arg name="base_frame" default="base_link" description="pose_source markers: empty for a handheld camera (the camera is the base)"/>
   <arg name="image_topic" default="/camera/image"/>
   <arg name="camera_info_topic" default="/camera/camera_info"/>
   <arg name="compressed" default="false"/>
-  <arg name="floor_offset" default="0.0" description="[m] how far the floor lies below base_frame (a vehicle on a stand)"/>
+  <arg name="floor_offset" default="0.0" description="[m] how far the floor lies below base_frame (a vehicle on a stand; handheld: the camera's height)"/>
+  <arg name="vertical" default="base" description="where up is: base (base_frame's z axis) or ceiling (opposite the ceiling markers' normal)"/>
   <arg name="pose_sd" default="0.05" description="pose_frame: [m] noise of the pose source per axis"/>
   <arg name="process_all" default="false" description="every frame in order, over a reliable subscription (recordings)"/>
   <arg name="start_paused" default="false" description="record only after ~/start (the web interface starts it)"/>
@@ -42,6 +44,7 @@
     <param name="output_dir" value="$(var output_dir)"/>
     <param name="dictionary" value="$(var dictionary)"/>
     <param name="marker_size" value="$(var marker_size)"/>
+    <param name="marker_size_sd" value="$(var marker_size_sd)"/>
     <param name="frame.mode" value="$(var frame_mode)"/>
     <param name="frame.origin_marker" value="$(var origin_marker)"/>
     <param name="frame.frame_id" value="$(var frame_id)"/>
@@ -54,6 +57,7 @@
     <param name="camera_info_topic" value="$(var camera_info_topic)"/>
     <param name="compressed" value="$(var compressed)"/>
     <param name="floor_offset" value="$(var floor_offset)"/>
+    <param name="vertical" value="$(var vertical)"/>
     <param name="pose_sd" value="$(var pose_sd)"/>
     <param name="process_all" value="$(var process_all)"/>
     <param name="start_paused" value="$(var start_paused)"/>

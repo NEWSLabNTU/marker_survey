@@ -13,7 +13,11 @@ bundle-adjusted and the result is written to `output_dir` in the frame
        the camera's pose:
          pose_source: odometry  nav_msgs/Odometry (visual-inertial, wheel and IMU)
          pose_source: tf        TF pose_frame -> image frame, any frame
-       TF image frame -> base_frame: where the floor is
+         pose_source: markers   none: every frame is placed on the markers already
+                                mapped (core/tracking.py); a frame with none in view
+                                is skipped (the status says `lost`)
+       TF image frame -> base_frame: where the floor is (pose_source markers with
+       base_frame empty or the image's frame: the camera is the base)
        frame.mode align_to_track: TF frame.reference_frame -> base_frame, the
        reference trajectory (a localizer's poses)
   out  ~/markers       visualization_msgs/MarkerArray, live
@@ -21,7 +25,8 @@ bundle-adjusted and the result is written to `output_dir` in the frame
                        something subscribes)
        ~/status        std_msgs/String, JSON twice a second: state, keyframes, the
                        markers with a light and a hint each, the last frame's
-                       detections, the trail (core/live.py); for the web interface
+                       detections, the trail (core/live.py), the tracking state
+                       (pose_source markers: ok or lost); for the web interface
        output_dir/marker_map.yaml, survey_report.yaml, survey_data.npz (solve again
        with marker_survey_solve); with keep_history, the previous ones are copied
        to output_dir/history/<date-time>/ first
@@ -58,6 +63,7 @@ from marker_survey.core.detection import Detector
 from marker_survey.core.se3 import make_T, matrix_to_quat, pose_at_stamp, quat_to_matrix
 from marker_survey.core.solve import DATA_FILE, MAP_FILE, REPORT_FILE, finish, save_dump
 from marker_survey.core.survey import Survey
+from marker_survey.core.tracking import MarkerTracker
 from marker_survey.params import PARAMETERS, SurveyParams
 from marker_survey.spin import spin
 
@@ -108,6 +114,7 @@ class MarkerSurveyNode(Node):
         self.origin = p.frame.origin_marker
 
         self.survey = None
+        self.tracker = None             # pose_source markers
         self.lock = threading.Lock()
         self.queue = collections.deque(maxlen=300)
         self.odom = collections.deque(maxlen=2000)
@@ -174,12 +181,15 @@ class MarkerSurveyNode(Node):
         try:
             p = SurveyParams(lambda k: new[k] if k in new else self.get_parameter(k).value,
                              check_frame=False)
-            if p.frame.mode == 'pose_frame' and self.p.pose_source != 'tf':
+            if p.frame.mode == 'pose_frame' and self.p.pose_source not in ('tf', 'markers'):
                 raise ValueError('frame.mode pose_frame needs pose_source tf (a map pose)')
         except ValueError as e:
             return SetParametersResult(successful=False, reason=str(e))
+        p.pose_source = self.p.pose_source
         self.p = p
         self.origin = p.frame.origin_marker
+        if self.tracker is not None:
+            self.tracker.origin_marker = self.origin
         if self.survey is not None:
             for k in ('motion_factors', 'pose_priors', 'pose_sd', 'pose_sd_rot'):
                 setattr(self.survey.s, k, getattr(p.settings, k))
@@ -212,6 +222,7 @@ class MarkerSurveyNode(Node):
                 self.survey = Survey(self.p.settings, self.K)
                 if old is not None:
                     self.survey.T_cam_base = old.T_cam_base
+                self.tracker = self.new_tracker()
             self.frames = self.no_pose = 0
             self.report, self.report_views, self.last_save = None, {}, None
             self.last_dets, self.saved = [], False
@@ -233,7 +244,14 @@ class MarkerSurveyNode(Node):
                 what = 'rectified'
             self.K = K
             self.survey = Survey(self.p.settings, K)
+            self.tracker = self.new_tracker()
             self.get_logger().info(f'camera: {msg.width}x{msg.height}, fx {K[0, 0]:.1f} px, {what}')
+
+    def new_tracker(self):
+        if self.p.pose_source != 'markers' or self.survey is None:
+            return None
+        return MarkerTracker(self.survey, self.origin, self.p.frame.floor_offset,
+                             self.p.frame.vertical)
 
     def on_odom(self, msg):
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
@@ -291,22 +309,28 @@ class MarkerSurveyNode(Node):
     def process(self, msg) -> bool:
         """Survey one frame; False if its pose is not available (yet)."""
         cam_frame = msg.header.frame_id
+        markers = self.p.pose_source == 'markers'
         if self.survey.T_cam_base is None:
-            T = self.lookup(cam_frame, self.p.base_frame, 0.0)
+            if markers and self.p.base_frame in ('', cam_frame):
+                T = np.eye(4)                     # handheld: the camera is the base
+            else:
+                T = self.lookup(cam_frame, self.p.base_frame, 0.0)
             if T is None:
                 self.get_logger().info(f'waiting for TF {cam_frame} -> {self.p.base_frame}',
                                        throttle_duration_sec=5.0)
                 return False
             self.survey.T_cam_base = T
         t = stamp_sec(msg.header.stamp)
-        T = self.pose_at(t, cam_frame)
-        if T is None:
-            # keep the frame: its pose may arrive a moment later
-            src = (f'the odometry topic {self.odom_topic} (a QoS mismatch gives exactly this)'
-                   if self.p.pose_source == 'odometry' else f'TF {self.p.pose_frame} -> {cam_frame}')
-            self.get_logger().info(f'no camera pose for this frame yet: is {src} arriving?',
-                                   throttle_duration_sec=5.0)
-            return False
+        T = None
+        if not markers:
+            T = self.pose_at(t, cam_frame)
+            if T is None:
+                # keep the frame: its pose may arrive a moment later
+                src = (f'the odometry topic {self.odom_topic} (a QoS mismatch gives exactly this)'
+                       if self.p.pose_source == 'odometry' else f'TF {self.p.pose_frame} -> {cam_frame}')
+                self.get_logger().info(f'no camera pose for this frame yet: is {src} arriving?',
+                                       throttle_duration_sec=5.0)
+                return False
         T_ref = None
         if self.p.reference_frame:         # recorded whenever there is one: the mode may change
             T_ref = self.lookup(self.p.reference_frame, self.p.base_frame, t)
@@ -323,14 +347,24 @@ class MarkerSurveyNode(Node):
             self.get_logger().error(f'image: {e}', throttle_duration_sec=5.0)
             return True
         self.frames += 1
+        new, keyframe = [], False
         with self.lock:
             known = set(self.survey.markers)
-            n_kf = len(self.survey.keyframes)
-            new = self.survey.add(t, T, dets, T_ref)
-            keyframe = len(self.survey.keyframes) > n_kf
+            if markers:
+                T = self.tracker.track(t, dets)
+            if T is not None:
+                n_kf = len(self.survey.keyframes)
+                new = self.survey.add(t, T, dets, T_ref)
+                keyframe = len(self.survey.keyframes) > n_kf
+                if self.survey.T_cam_base is not None:
+                    self.last_T_base = T @ self.survey.T_cam_base
             self.last_dets = live.detection_states(self.survey, dets, known)
-            if self.survey.T_cam_base is not None:
-                self.last_T_base = T @ self.survey.T_cam_base
+        if T is None:
+            seen = [d.id for d in dets if self.survey.usable(d)]
+            self.get_logger().info(
+                'frame not placed: no mapped marker in view'
+                + (f' (sees {seen}: they stay unmapped until seen with a mapped one)' if seen else '')
+                + '; go back to a mapped marker', throttle_duration_sec=5.0)
         if self.pub_dbg.get_subscription_count() > 0:
             self.publish_debug(msg.header, gray, dets, known, keyframe)
         for mid in new:
@@ -351,6 +385,8 @@ class MarkerSurveyNode(Node):
         origin = '' if self.origin is None or self.origin in self.survey.markers else \
             f'; origin marker {self.origin} NOT SEEN YET'
         dropped = f' ({self.no_pose} dropped: no camera pose)' if self.no_pose else ''
+        if self.tracker is not None and self.tracker.unplaced:
+            dropped += f' ({self.tracker.unplaced} not placed: no mapped marker in view)'
         self.get_logger().info(f'{self.frames} frames{dropped}, {len(self.survey.keyframes)} keyframes; '
                                f'markers (views) {views or "none"}{origin}')
         self.publish_markers()
@@ -360,7 +396,8 @@ class MarkerSurveyNode(Node):
         frame = {'mode': p.frame.mode, 'origin_marker': p.frame.origin_marker,
                  'frame_id': p.frame.frame_id, 'reference_frame': p.reference_frame,
                  'pose_source': p.pose_source, 'pose_frame': p.pose_frame,
-                 'odom_frame': self.odom_frame if p.pose_source == 'odometry' else p.pose_frame}
+                 'odom_frame': (self.odom_frame if p.pose_source == 'odometry' else
+                                p.frame.frame_id if p.pose_source == 'markers' else p.pose_frame)}
         state = 'recording' if self.recording else 'paused'
         with self.lock:
             out = live.status_dict(
@@ -372,6 +409,21 @@ class MarkerSurveyNode(Node):
                  'marker_size': p.settings.marker_size, 'last_save': self.last_save,
                  'origin_seen': (self.origin is not None and self.survey is not None
                                  and self.origin in self.survey.markers)})
+            out.update(self.tracking_status())
+        return out
+
+    def tracking_status(self) -> dict:
+        """pose_source; tracking ok or lost (markers: no mapped marker in the last frame,
+        so new markers cannot be linked; other sources: no camera pose for it), lost_since
+        [s] or None, the last mapped marker in view (markers) or None."""
+        out = {'pose_source': self.p.pose_source}
+        if self.tracker is not None:
+            st = self.tracker.status()
+            out.update({k: st[k] for k in ('tracking', 'lost_since', 'last_known_marker')})
+            out['unplaced'] = st['unplaced']
+        else:
+            out.update({'tracking': 'ok', 'lost_since': None, 'last_known_marker': None,
+                        'unplaced': 0})
         return out
 
     def publish_status(self):
@@ -420,7 +472,8 @@ class MarkerSurveyNode(Node):
 
     def publish_markers(self):
         arr = MarkerArray()
-        frame = self.p.pose_frame if self.p.pose_source == 'tf' else self.odom_frame
+        frame = (self.p.pose_frame if self.p.pose_source == 'tf' else
+                 self.p.frame.frame_id if self.p.pose_source == 'markers' else self.odom_frame)
         for k, (mid, m) in enumerate(sorted(self.survey.markers.items())):
             T = m.T_world_marker
             q = matrix_to_quat(T[:3, :3])

@@ -3,10 +3,10 @@ without a running node."""
 
 import math
 
-from marker_survey.core.frames import FRAME_MODES, FrameSettings
+from marker_survey.core.frames import FRAME_MODES, VERTICALS, FrameSettings
 from marker_survey.core.survey import SurveySettings
 
-POSE_SOURCES = {'odometry': 'odometry', 'odom': 'odometry', 'tf': 'tf'}
+POSE_SOURCES = {'odometry': 'odometry', 'odom': 'odometry', 'tf': 'tf', 'markers': 'markers'}
 
 
 def parse_sizes(items) -> dict:
@@ -35,9 +35,12 @@ class SurveyParams:
         self.frame = FrameSettings(mode=str(get('frame.mode')),
                                    origin_marker=int(get('frame.origin_marker')),
                                    frame_id=str(get('frame.frame_id')),
-                                   floor_offset=float(get('floor_offset')))
+                                   floor_offset=float(get('floor_offset')),
+                                   vertical=str(get('vertical')))
         if self.frame.mode not in FRAME_MODES:
             raise ValueError(f'frame.mode {self.frame.mode!r} is not one of {", ".join(FRAME_MODES)}')
+        if self.frame.vertical not in VERTICALS:
+            raise ValueError(f'vertical {self.frame.vertical!r} is not one of {", ".join(VERTICALS)}')
         if self.frame.mode != 'origin_marker':
             self.frame.origin_marker = None
         elif self.frame.origin_marker is not None and self.frame.origin_marker < 0:
@@ -46,7 +49,7 @@ class SurveyParams:
             self.frame.check()
         src = str(get('pose_source'))
         if src not in POSE_SOURCES:
-            raise ValueError(f'pose_source {src!r} is not one of odometry, tf')
+            raise ValueError(f'pose_source {src!r} is not one of odometry, tf, markers')
         self.pose_source = POSE_SOURCES[src]
         self.pose_frame = str(get('pose_frame'))
         if self.pose_source == 'tf' and not self.pose_frame:
@@ -68,7 +71,11 @@ class SurveyParams:
             marker_size_sd=float(get('marker_size_sd')))
         if not self.settings.marker_size_sd >= 0:
             raise ValueError('marker_size_sd must be 0 or positive: the relative sd of the size')
-        if self.frame.mode == 'pose_frame':
+        if self.pose_source == 'markers':
+            # the markers are the only pose source: nothing links the keyframes but them
+            self.settings.motion_factors = False
+            self.settings.pose_priors = False
+        elif self.frame.mode == 'pose_frame':
             # a map pose jitters frame to frame: absolute priors, not its relative motion
             self.settings.motion_factors = bool(get('pose_frame_motion'))
             self.settings.pose_priors = True
@@ -77,6 +84,8 @@ class SurveyParams:
         self.result_frame_id = self.frame.frame_id
         if self.frame.mode == 'pose_frame' and self.pose_source == 'tf':
             self.result_frame_id = self.pose_frame
+        elif self.frame.mode == 'pose_frame' and self.pose_source == 'markers':
+            self.result_frame_id = self.frame.frame_id      # the first keyframe's camera
         elif self.frame.mode == 'align_to_track':
             self.result_frame_id = self.reference_frame
         self.frame.frame_id = self.result_frame_id
@@ -100,6 +109,7 @@ PARAMETERS = {
     'frame.frame_id': 'map',
     'frame.reference_frame': '',
     'floor_offset': 0.0,
+    'vertical': 'base',
     'rate': 5.0,
     'process_all': False,
     'pose_tolerance': 0.1,

@@ -62,14 +62,18 @@ def finish(survey: Survey, frame: fr.FrameSettings, dictionary: str, output_dir:
         log(f'solved: reprojection RMS {info["reproj_rms_px"]:.2f} px, corner noise '
             f'{info["pixel_noise_px"]:.2f} px ({info["status"]})')
     base = [T @ survey.T_cam_base for T in poses]
-    floor_p, floor_n = fr.floor_from_base_poses(base, frame.floor_offset)
+    floor_p, floor_n = fr.floor_of(base, list(markers.values()), frame.floor_offset, frame.vertical)
     frame_info = {'mode': frame.mode, 'frame_id': frame.frame_id}
+    if frame.vertical != 'base':
+        frame_info['vertical'] = frame.vertical
     align = None
     if frame.mode == 'origin_marker':
         T_tw = inv_T(fr.origin_marker_frame(markers[frame.origin_marker], floor_p, floor_n))
         frame_info['origin_marker'] = int(frame.origin_marker)
         frame_info['definition'] = ('origin on the floor below the origin marker centre, '
-                                    'x the way it faces, z up')
+                                    'x the way it faces, z up'
+                                    + (' (opposite the ceiling markers\' normal)'
+                                       if frame.vertical == 'ceiling' else ''))
     elif frame.mode == 'pose_frame':
         T_tw = np.eye(4)
         frame_info['definition'] = "the pose source's frame"
@@ -158,9 +162,11 @@ def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, b
     fit placed it.
 
     Relative: the same with a common shift and turn about the vertical of the whole
-    map taken out (an S-transformation to the markers' centroid): how well each marker
-    sits among the others, what driving past it again improves, and what a robot
-    localizing on the map feels. The verdicts use this one."""
+    map taken out (an S-transformation to the markers' centroid; with no motion factor
+    and no pose prior, pose_source markers, a common tilt too: nothing but the
+    markers levels such a survey): how well each marker sits among the others, what
+    driving past it again improves, and what a robot localizing on the map feels. The
+    verdicts use this one."""
     if survey.joint_cov is None or survey.joint_cov[1] is None:
         return {}
     ids, C = survey.joint_cov
@@ -173,7 +179,16 @@ def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, b
     a0 = 6 * nm + 6 * rows.index('align') if 'align' in rows and align is not None else None
     f0 = 6 * nm + 6 * rows.index('floor') if has_floor else None
     origin = frame.origin_marker if frame.mode == 'origin_marker' else None
-    y0 = np.concatenate([params_from_T(markers[m]) for m in ids]
+    ceiling = origin is not None and frame.vertical == 'ceiling'
+
+    def params_of(m):
+        # the solve's own parameters where they are the same pose (see Survey.joint_params)
+        q = getattr(survey, 'joint_params', {}).get(m)
+        if q is not None and np.allclose(T_from_params(q), markers[m], atol=1e-9):
+            return np.asarray(q, float)
+        return params_from_T(markers[m])
+
+    y0 = np.concatenate([params_of(m) for m in ids]
                         + [floor_vector(base_poses) if r == 'floor' else np.zeros(ALIGN_PARAMS)
                            for r in rows])
 
@@ -191,9 +206,14 @@ def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, b
         if has_floor:
             f = y[f0:f0 + FLOOR_PARAMS]
             n = f[:3] / np.linalg.norm(f[:3])
-            p = f[3:] - float(frame.floor_offset) * n
+            centre = f[3:]
         else:
-            p, n = fr.floor_from_base_poses(base_poses, frame.floor_offset)
+            n, centre = fr.floor_from_base_poses(base_poses)[1], np.mean(
+                [T[:3, 3] for T in base_poses], axis=0)
+        if ceiling:
+            # up from the ceiling markers (their plane): the frame moves with every marker
+            n = fr.ceiling_vertical([T_from_params(y[6 * i:6 * i + 6]) for i in range(nm)])
+        p = centre - float(frame.floor_offset) * n
         return inv_T(fr.origin_marker_frame(o, p, n))
 
     F0 = frame_of(y0)
@@ -210,6 +230,8 @@ def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, b
     frame_cols = set()
     if origin is not None:
         frame_cols = set(range(6 * idx[origin], 6 * idx[origin] + 6))
+        if ceiling:
+            frame_cols |= set(range(6 * nm))
         if has_floor:
             frame_cols |= set(range(f0, f0 + FLOOR_PARAMS))
     if a0 is not None:
@@ -230,7 +252,8 @@ def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, b
     if a0 is not None:
         Gm[:, a0:a0 + ALIGN_PARAMS] = 0.0
     Cm = Gm @ C @ Gm.T
-    Cr = relative_covariance(Cm, [T_hat[m] for m in ids])
+    only_markers = not survey.s.motion_factors and not survey.s.pose_priors
+    Cr = relative_covariance(Cm, [T_hat[m] for m in ids], tilt=only_markers)
     if Cr is None:
         Cr = Cm
     Ct = G @ C @ G.T
@@ -255,20 +278,23 @@ def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, b
             for i, m in enumerate(ids)}
 
 
-def relative_covariance(C, poses):
+def relative_covariance(C, poses, tilt: bool = False):
     """The joint covariance `C` (6 per marker: local rotation vector, translation) with
-    a common shift and turn about z of all markers taken out: the S-transformation to
-    the minimum trace of the positions. None with fewer than three markers."""
+    a common shift and turn about z of all markers taken out (with `tilt`, a turn about
+    x and y too: a survey that only the markers hold together, pose_source markers,
+    has no level of its own): the S-transformation to the minimum trace of the
+    positions. None with fewer than three markers."""
     nm = len(poses)
     if nm < 3:
         return None
-    H = np.zeros((6 * nm, 4))
+    axes = [np.eye(3)[k] for k in ((0, 1, 2) if tilt else (2,))]
+    H = np.zeros((6 * nm, 3 + len(axes)))
     c = np.mean([T[:3, 3] for T in poses], axis=0)
-    z = np.array([0.0, 0.0, 1.0])
     for i, T in enumerate(poses):
         H[6 * i + 3:6 * i + 6, :3] = np.eye(3)
-        H[6 * i + 3:6 * i + 6, 3] = np.cross(z, T[:3, 3] - c)
-        H[6 * i:6 * i + 3, 3] = T[:3, :3].T @ z
+        for k, a in enumerate(axes):
+            H[6 * i + 3:6 * i + 6, 3 + k] = np.cross(a, T[:3, 3] - c)
+            H[6 * i:6 * i + 3, 3 + k] = T[:3, :3].T @ a
     W = np.zeros(6 * nm)
     for i in range(nm):
         W[6 * i + 3:6 * i + 6] = 1.0
@@ -316,7 +342,7 @@ def save_dump(path: str, survey: Survey, dictionary: str, frame: fr.FrameSetting
         detections=np.array(rows, dtype=float).reshape(-1, 10),
         marker_size=s.marker_size, marker_sizes=sizes, dictionary=dictionary,
         frame_mode=frame.mode, origin_marker=-1 if frame.origin_marker is None else frame.origin_marker,
-        frame_id=frame.frame_id, floor_offset=frame.floor_offset,
+        frame_id=frame.frame_id, floor_offset=frame.floor_offset, vertical=frame.vertical,
         motion_factors=s.motion_factors, pose_priors=s.pose_priors, pose_sd=s.pose_sd,
         pose_sd_rot=s.pose_sd_rot, odom_drift=s.odom_drift, marker_size_sd=s.marker_size_sd)
 
@@ -350,5 +376,6 @@ def load_dump(path: str, settings: Optional[SurveySettings] = None):
     frame = fr.FrameSettings(mode=str(d['frame_mode']) if 'frame_mode' in d else 'origin_marker',
                              origin_marker=None if om < 0 else om,
                              frame_id=str(d['frame_id']) if 'frame_id' in d else 'map',
-                             floor_offset=float(d['floor_offset']) if 'floor_offset' in d else 0.0)
+                             floor_offset=float(d['floor_offset']) if 'floor_offset' in d else 0.0,
+                             vertical=str(d['vertical']) if 'vertical' in d else 'base')
     return sv, str(d['dictionary']), frame

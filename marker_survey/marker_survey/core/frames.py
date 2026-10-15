@@ -3,9 +3,11 @@
 | mode            | result frame                                                         |
 |-----------------|----------------------------------------------------------------------|
 | origin_marker   | origin on the floor below a chosen marker, x the way it faces, z up  |
-|                 | (the floor normal from the base frame's poses)                       |
+|                 | (the floor normal from the base frame's poses, or with vertical      |
+|                 | ceiling from the ceiling markers' normals)                           |
 | pose_frame      | the pose source's own frame (for example `map` while a localizer     |
-|                 | runs); nothing is moved                                               |
+|                 | runs; pose_source markers: the first keyframe's camera); nothing is  |
+|                 | moved                                                                |
 | align_to_track  | the survey runs in the odometry frame; the solved base trajectory is |
 |                 | then fitted rigidly (Umeyama, no scale) to a reference trajectory    |
 |                 | recorded at the same stamps (a localizer's poses)                    |
@@ -15,6 +17,7 @@ frame.
 """
 
 from dataclasses import dataclass
+import math
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -22,6 +25,8 @@ import numpy as np
 from marker_survey.core.se3 import make_T, umeyama
 
 FRAME_MODES = ('origin_marker', 'pose_frame', 'align_to_track')
+# where up is: the base frame's z axis, or opposite the normal of markers on a level ceiling
+VERTICALS = ('base', 'ceiling')
 
 
 @dataclass
@@ -30,10 +35,13 @@ class FrameSettings:
     origin_marker: Optional[int] = None   # origin_marker mode
     frame_id: str = 'map'                 # the result frame's name, written to the map
     floor_offset: float = 0.0             # [m] the floor lies this far below the base frame
+    vertical: str = 'base'                # VERTICALS: where the floor normal comes from
 
     def check(self):
         if self.mode not in FRAME_MODES:
             raise ValueError(f'frame mode {self.mode!r} is not one of {", ".join(FRAME_MODES)}')
+        if self.vertical not in VERTICALS:
+            raise ValueError(f'vertical {self.vertical!r} is not one of {", ".join(VERTICALS)}')
         if self.mode == 'origin_marker' and (self.origin_marker is None or self.origin_marker < 0):
             raise ValueError('frame mode origin_marker needs frame.origin_marker: the marker '
                              'that defines the frame')
@@ -45,6 +53,42 @@ def floor_from_base_poses(T_world_base: Sequence[np.ndarray], floor_offset: floa
     zs = np.array([T[:3, 2] for T in T_world_base])
     n = zs.mean(axis=0)
     n /= np.linalg.norm(n)
+    p = np.mean([T[:3, 3] for T in T_world_base], axis=0) - float(floor_offset) * n
+    return p, n
+
+
+def ceiling_vertical(marker_poses) -> np.ndarray:
+    """The up direction from markers on a level ceiling: the normal of the plane fitted
+    through their centres (a centimetre over metres: a tenth of a degree), turned
+    against their faces; with fewer than three markers, or all in a line, the opposite
+    of their mean normal. Raises if they do not face one way (not all on the ceiling)."""
+    zs = np.array([T[:3, 2] for T in marker_poses])
+    if not len(zs):
+        raise ValueError('vertical ceiling: no marker')
+    face = zs.mean(axis=0)
+    face /= np.linalg.norm(face)
+    worst = max(math.degrees(math.acos(float(np.clip(z @ face, -1.0, 1.0)))) for z in zs)
+    if worst > 30.0:
+        raise ValueError(f'vertical ceiling: the markers do not face one way (one is {worst:.0f} deg '
+                         'off their mean), so they are not all on the ceiling: use vertical base')
+    up = -face
+    if len(zs) >= 3:
+        P = np.array([T[:3, 3] for T in marker_poses])
+        _, sv, vt = np.linalg.svd(P - P.mean(axis=0))
+        if sv[1] > 0.2 * sv[0] and sv[1] > 1e-6:          # spread in two directions
+            n = vt[2]
+            up = n if n @ up > 0 else -n
+    return up
+
+
+def floor_of(T_world_base: Sequence[np.ndarray], marker_poses, floor_offset: float = 0.0,
+             vertical: str = 'base'):
+    """The floor (point, normal): vertical base, floor_from_base_poses; vertical ceiling,
+    the normal from the ceiling markers (ceiling_vertical) and the point floor_offset
+    below the mean base origin (a handheld camera at about the same height all along)."""
+    if vertical != 'ceiling':
+        return floor_from_base_poses(T_world_base, floor_offset)
+    n = ceiling_vertical(marker_poses)
     p = np.mean([T[:3, 3] for T in T_world_base], axis=0) - float(floor_offset) * n
     return p, n
 

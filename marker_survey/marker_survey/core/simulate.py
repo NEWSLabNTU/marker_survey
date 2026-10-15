@@ -200,3 +200,106 @@ def settings_for(mode: str, marker_size: float, sizes: Dict[int, float] = None,
     if mode == 'pose_frame':
         s.motion_factors, s.pose_priors, s.pose_sd = False, True, pose_sd
     return s
+
+
+# ------------------------------------------------------------------ a handheld camera
+
+@dataclass
+class Hand:
+    """A person walking with a camera held up: the camera at `height` above the floor
+    looking straight up, turned `hold_deg` about its axis from image top ahead (90:
+    the image's long side along the walk, which keeps two markers of a row in view
+    longest), with a hand's shake (roll and pitch, sd
+    `shake_deg`, and a little yaw), its height bobbing by `bob` (sd), both wandering
+    with correlation time `tau`; and a stretch where the camera is tilted away from the
+    ceiling (`tilt_at` s into the walk, for `tilt_for` s, by `tilt_deg`; ramps of
+    `tilt_ramp` s at either end are part of the stretch)."""
+    height: float = 1.0
+    hold_deg: float = 90.0
+    shake_deg: float = 2.0
+    yaw_shake_deg: float = 2.0
+    bob: float = 0.02
+    tau: float = 0.7
+    tilt_at: Optional[float] = None
+    tilt_for: float = 3.0
+    tilt_deg: float = 110.0
+    tilt_ramp: float = 0.3
+    seed: int = 1
+
+
+def handheld_camera(width=640, height=480, hfov_deg=70.0) -> Camera:
+    """A handheld webcam: the camera is its own base (T_base_cam the identity)."""
+    return Camera(pinhole_K(width, height, hfov_deg), width, height, np.eye(4))
+
+
+def tilt_window(hand: Hand):
+    """(start, end) [s into the walk] where the camera is fully tilted away (the ramps
+    left out), or None."""
+    if hand.tilt_at is None:
+        return None
+    return hand.tilt_at + hand.tilt_ramp, hand.tilt_at + hand.tilt_for - hand.tilt_ramp
+
+
+def walk(path_xy: Sequence[Tuple[float, float]], speed: float = 0.5, rate: float = 5.0,
+         hand: Hand = None) -> List[np.ndarray]:
+    """Camera poses T_world_cam of a handheld camera walked along a polyline at `speed`,
+    one per frame at `rate`; the heading follows the path, smoothed over half a metre
+    (a person turns while walking, not on the spot)."""
+    hand = hand or Hand()
+    step = speed / rate
+    pts = []
+    for i in range(len(path_xy) - 1):
+        (x0, y0), (x1, y1) = path_xy[i], path_xy[i + 1]
+        n = max(1, int(round(math.hypot(x1 - x0, y1 - y0) / step)))
+        pts += [(x0 + k / n * (x1 - x0), y0 + k / n * (y1 - y0)) for k in range(n)]
+    pts.append(tuple(path_xy[-1]))
+    pts = np.array(pts, float)
+    d = np.diff(pts, axis=0)
+    yaw = np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
+    yaw = np.append(yaw, yaw[-1])
+    w = max(1, int(round(0.5 / step)))
+    pad = np.concatenate([np.full(w, yaw[0]), yaw, np.full(w, yaw[-1])])
+    yaw = np.convolve(pad, np.ones(2 * w + 1) / (2 * w + 1), mode='valid')
+    rng = np.random.default_rng(hand.seed + 4000)
+    a = math.exp(-1.0 / (rate * hand.tau))
+    z = rng.normal(0, 1, 4)
+    out = []
+    win = None if hand.tilt_at is None else (hand.tilt_at, hand.tilt_at + hand.tilt_for)
+    for k, ((x, y), h) in enumerate(zip(pts, yaw)):
+        if k > 0:
+            z = a * z + math.sqrt(1 - a * a) * rng.normal(0, 1, 4)
+        roll, pitch = (math.radians(hand.shake_deg) * v for v in z[:2])
+        dyaw = math.radians(hand.yaw_shake_deg) * z[2]
+        t = k / rate
+        tilt = 0.0
+        if win is not None and win[0] <= t <= win[1]:
+            f = min(1.0, (t - win[0]) / hand.tilt_ramp, (win[1] - t) / hand.tilt_ramp) \
+                if hand.tilt_ramp > 0 else 1.0
+            tilt = math.radians(hand.tilt_deg) * max(0.0, f)
+        # the hand's frame: x ahead, z up; the camera looks up, image top ahead, tilted
+        # forward (about the hand's y axis) by `tilt`
+        R_hand = rot_z(h + dyaw) @ rotvec_to_matrix([roll, pitch + tilt, 0.0])
+        R = R_hand @ R_BASE_UPWARD @ rot_z(math.radians(hand.hold_deg))
+        out.append(make_T(R, [x, y, hand.height + hand.bob * z[3]]))
+    return out
+
+
+def simulate_markers(markers: Dict[int, np.ndarray], sizes: Dict[int, float],
+                     cam_poses: List[np.ndarray], camera: Camera, settings: SurveySettings,
+                     origin_marker: Optional[int] = None, floor_offset: float = 0.0,
+                     vertical: str = 'base', pixel_sd: float = 0.5, seed: int = 1, rate: float = 5.0):
+    """A camera-only survey (pose_source markers) fed with corner-level detections of
+    every camera pose: (survey, tracker)."""
+    from marker_survey.core.tracking import MarkerTracker
+    rng = np.random.default_rng(seed + 2000)
+    settings.motion_factors = False
+    settings.pose_priors = False
+    sv = Survey(settings, camera.K)
+    sv.T_cam_base = inv_T(camera.T_base_cam)
+    tr = MarkerTracker(sv, origin_marker, floor_offset, vertical)
+    for k, T_wc in enumerate(cam_poses):
+        dets = project(markers, sizes, camera, T_wc, rng, pixel_sd)
+        T = tr.track(k / rate, dets)
+        if T is not None:
+            sv.add(k / rate, T, dets)
+    return sv, tr

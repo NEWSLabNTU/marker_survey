@@ -108,6 +108,10 @@ class Survey:
         # fixed, by its sd (the marker size): fully correlated, not in joint_cov
         self.joint_bias = []
         self.align_centroid = None      # align_gauge: the centroid of the fitted base positions
+        # the markers' parameters as the last solve left them, {id: rotation vector and
+        # translation}: joint_cov is about these (a rotation vector past pi is not the
+        # one params_from_T gives back, and its derivatives differ)
+        self.joint_params = {}
 
     def wants_keyframe(self, T_world_cam: np.ndarray, detections: List[Detection]) -> bool:
         if not detections:
@@ -284,6 +288,8 @@ class Survey:
         proj = r[:8 * len(obs)].reshape(len(obs), 8) * s.pixel_sd
         Rk, tk, Rm, tm = unpack(x)
         markers = {mid: make_T(Rm[mi[mid]], tm[mi[mid]]) for mid in ids}
+        self.joint_params = {mid: x[6 * nkp + 6 * mi[mid]:6 * nkp + 6 * mi[mid] + 6].copy()
+                             for mid in ids}
         poses = [make_T(Rk[k], tk[k]) for k in range(nk)]
         extra = None
         if s.track_sd and any(kf.T_ref_base is not None for kf in kfs):
@@ -299,6 +305,11 @@ class Survey:
         npix = 8 * len(obs)
         dof = max(npix - npar, npix // 2)
         noise = float(1.4826 * np.median(np.abs(r[:npix])) * math.sqrt(npix / dof)) * s.pixel_sd
+        # the median assumes the fitted parameters soak up the residuals evenly; keyframes
+        # that see one marker only (pose_source markers) fit theirs almost exactly and
+        # pull it far down: the plain estimate, outliers clipped at 5 px, is the floor
+        clipped = np.minimum(np.abs(r[:npix]), 5.0 / s.pixel_sd)
+        noise = max(noise, float(math.sqrt(np.sum(clipped ** 2) / dof)) * s.pixel_sd)
         cov_px = max(noise, s.min_pixel_sd)
         from scipy.sparse import csr_matrix, diags
         w = np.ones(nres)

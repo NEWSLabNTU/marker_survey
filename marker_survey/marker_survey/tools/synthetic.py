@@ -15,6 +15,14 @@ rosbag2 with the topics the survey node reads:
                          localizer pose at every image's stamp (a state
                          estimator's pose, for the localizer's gate)
 
+With --camera handheld: a person walking the route with a webcam held up at
+--hand-height, shaking (--shake-deg), the camera tilted away from the ceiling
+for --tilt-for seconds from --tilt-at; the camera is its own base, so the bag
+holds only /camera/image and /camera/camera_info (no odometry, no TF, no
+prior: pose_source markers and a localizer without prior), and the truth
+poses are the camera's (camera_optical_frame); scene.json gives the stamps
+where the camera is fully tilted away (tilt_window).
+
 With --split-at S, also bag_1 (the first S seconds) and bag_2 (the rest),
 each with /tf_static: a drive that stops and goes on, as a survey that is
 saved and then continued ("pass again") sees it.
@@ -48,6 +56,7 @@ CAMERAS = {
     # name: (width, height, hfov_deg, factory)
     'forward': (960, 600, 102.0, sim.forward_camera),
     'upward': (640, 480, 70.0, sim.upward_camera),
+    'handheld': (640, 480, 70.0, sim.handheld_camera),
 }
 TF_STATIC_QOS = ('- history: 3\n  depth: 0\n  reliability: 1\n  durability: 1\n'
                  '  deadline: {sec: 2147483647, nsec: 4294967295}\n'
@@ -105,9 +114,22 @@ def parse_args(argv=None):
     ap.add_argument('--start-time', type=float, default=1_000_000_000.0,
                     help='[s] the stamp the recording starts at; a later one for a second drive '
                          'played after the first')
+    ap.add_argument('--hand-height', type=float, default=1.0,
+                    help='handheld: [m] the camera above the floor')
+    ap.add_argument('--shake-deg', type=float, default=2.0,
+                    help='handheld: sd of the hand\'s roll and pitch [deg]')
+    ap.add_argument('--tilt-at', type=float,
+                    help='handheld: [s] into the walk, the camera is tilted away from the ceiling')
+    ap.add_argument('--tilt-for', type=float, default=3.0, help='handheld: [s] for this long')
     ap.add_argument('--split-at', type=float,
                     help='[s] also write bag_1 (up to this time into the drive) and bag_2 (the rest)')
     return ap.parse_args(argv)
+
+
+def hand_of(args) -> sim.Hand:
+    return sim.Hand(height=args.hand_height, shake_deg=args.shake_deg,
+                    yaw_shake_deg=args.shake_deg, tilt_at=args.tilt_at, tilt_for=args.tilt_for,
+                    seed=args.seed)
 
 
 def scene(args):
@@ -117,6 +139,14 @@ def scene(args):
         site.marker_size = args.marker_size
     w, h, hfov, factory = CAMERAS[args.camera]
     camera = factory(width=args.width or w, height=args.height or h, hfov_deg=args.hfov or hfov)
+    if args.camera == 'handheld':
+        path = list(load_path_csv(args.route))
+        if not args.open and path[0] != path[-1]:
+            path.append(path[0])
+        path = path + path[1:] * (args.laps - 1)
+        hand = hand_of(args)
+        poses = sim.walk(path, speed=args.speed, rate=args.rate, hand=hand)
+        return site, camera, [sim.Frame(k / args.rate, T, T, T) for k, T in enumerate(poses)]
     step = args.speed / args.rate
     poses = sim.route(load_path_csv(args.route), laps=args.laps, closed=not args.open, step=step,
                       sweeps=args.sweeps, sweep_deg=args.sweep_deg)
@@ -164,6 +194,9 @@ def main(argv=None):
         '/tf_static': 'tf2_msgs/msg/TFMessage',
         '/prior_pose': 'geometry_msgs/msg/PoseWithCovarianceStamped',
     }
+    handheld = args.camera == 'handheld'
+    if handheld:                        # the camera alone: no odometry, no TF, no prior
+        topics = {k: v for k, v in topics.items() if k.startswith('/camera/')}
     for wr in writers:
         for n, (name, typ) in enumerate(topics.items()):
             wr.create_topic(topic_metadata(rosbag2_py, n, name, typ,
@@ -201,9 +234,9 @@ def main(argv=None):
 
     static = TFMessage(transforms=[tfs('base_link', 'camera_link', T_base_link, t0),
                                    tfs('camera_link', 'camera_optical_frame', T_link_opt, t0)])
-    for wr in writers[:2]:
+    for wr in ([] if handheld else writers[:2]):
         wr.write('/tf_static', ser.serialize_message(static), ns(t0))
-    if split_ns is not None:            # the second part starts where it starts: its own static TF
+    if split_ns is not None and not handheld:   # the second part starts where it starts: its own static TF
         writers[2].write('/tf_static', ser.serialize_message(static), split_ns)
 
     odo_div = 3                        # odometry 3x the camera rate
@@ -214,7 +247,7 @@ def main(argv=None):
     for k, f in enumerate(frames):
         t = t0 + 1.0 + k * dt
         prev = frames[k - 1].T_odom_base if k > 0 else f.T_odom_base
-        steps = range(1, odo_div + 1) if k > 0 else [odo_div]
+        steps = [] if handheld else range(1, odo_div + 1) if k > 0 else [odo_div]
         for j in steps:                # odometry since the last frame, interpolated
             tj = t - dt + j * dt / odo_div
             Tj = interpolate_T(prev, f.T_odom_base, j / odo_div)
@@ -242,7 +275,8 @@ def main(argv=None):
          pr.pose.pose.orientation.w) = (float(v) for v in matrix_to_quat(P[:3, :3]))
         cov = np.diag([prior_var[0], prior_var[0], 1e-4, 1e-4, 1e-4, prior_var[1]])
         pr.pose.covariance = [float(v) for v in cov.ravel()]
-        put('/prior_pose', ser.serialize_message(pr), ns(t) - 1)
+        if not handheld:
+            put('/prior_pose', ser.serialize_message(pr), ns(t) - 1)
         Tt = f.T_map_base
         truth_rows.append((msg_stamp(t), *Tt[:3, 3], *matrix_to_quat(Tt[:3, :3])))
         img = renderer.render(markers, sizes, f.T_map_base @ camera.T_base_cam)
@@ -275,7 +309,12 @@ def main(argv=None):
         for r in truth_rows:
             fh.write(r[0] + ',' + ','.join(f'{v:.9f}' for v in r[1:]) + '\n')
     with open(os.path.join(args.out, 'scene.json'), 'w') as fh:
-        json.dump({k: v for k, v in vars(args).items()}, fh, indent=1)
+        meta = dict(vars(args))
+        win = sim.tilt_window(hand_of(args)) if handheld else None
+        if win is not None:
+            # [s] stamps between which the camera is fully tilted away from the ceiling
+            meta['tilt_window'] = [t0 + 1.0 + win[0], t0 + 1.0 + win[1]]
+        json.dump(meta, fh, indent=1)
     length = sum(np.linalg.norm(frames[i + 1].T_map_base[:3, 3] - frames[i].T_map_base[:3, 3])
                  for i in range(len(frames) - 1))
     print(f'{len(frames)} frames, {len(frames) * dt:.0f} s, {length:.0f} m driven; bag {bag}; '
