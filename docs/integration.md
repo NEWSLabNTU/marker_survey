@@ -164,7 +164,11 @@ the node, and its `~/` topics and services follow: `node_name:=markers_front`
 publishes `/markers_front/pose`; `survey.launch.xml` (default
 `marker_survey`) and `web.launch.xml` (default `marker_survey_web`) take
 the same argument, and the web node's `survey_node` and `localizer_node`
-then name the renamed nodes.
+then name the renamed nodes. A launch file that includes more than one of
+them puts each `<include>` in its own `<group>`: otherwise one include's
+arguments (`node_name`, `param_file`) carry over to the next, and all the
+nodes take the first one's name (`examples/ceiling/launch/web.launch.xml`
+does this).
 
 Parameters (`marker_localizer/marker_localizer/params.py`; the launch file
 passes the ones marked with an argument of the same name, and any of them

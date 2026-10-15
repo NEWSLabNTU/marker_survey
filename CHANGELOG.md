@@ -50,7 +50,9 @@ its own `version` (now 1); the loader keeps reading older versions.
 - `localizer.launch.xml`, `survey.launch.xml` and `web.launch.xml` take
   `node_name` (defaults `marker_localizer`, `marker_survey`,
   `marker_survey_web`, as before); the nodes' `~/` topics and services
-  follow it.
+  follow it. A launch file that includes several of them puts each
+  include in its own `<group>`, or the first one's `node_name` carries
+  over to the others; `examples/ceiling/launch/web.launch.xml` does.
 
 ### Tools
 

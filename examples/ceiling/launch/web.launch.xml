@@ -12,6 +12,9 @@
   <site>/survey/; "Use the map" writes <site>/marker_map.yaml, which the
   localizer reads (it waits for the file on a new site).
 
+  Each include is in its own <group>: the included files' arguments
+  (node_name, param_file) would otherwise carry over from one to the next.
+
   The simulated recording of docs/integration.md plays into this file with
   image_topic:=/camera/image camera_info_topic:=/camera/camera_info
   prior_topic:=/prior_pose prior_type:=pose use_sim_time:=true process_all:=true.
@@ -27,26 +30,32 @@
   <arg name="process_all" default="false"/>
   <let name="here" value="$(dirname)"/>
 
-  <include file="$(var here)/survey.launch.xml">
-    <arg name="output_dir" value="$(var site)/survey"/>
-    <arg name="image_topic" value="$(var image_topic)"/>
-    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
-    <arg name="use_sim_time" value="$(var use_sim_time)"/>
-    <arg name="process_all" value="$(var process_all)"/>
-    <arg name="start_paused" value="true"/>
-  </include>
-  <include file="$(var here)/localizer.launch.xml">
-    <arg name="marker_map" value="$(var site)/marker_map.yaml"/>
-    <arg name="image_topic" value="$(var image_topic)"/>
-    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
-    <arg name="prior_topic" value="$(var prior_topic)"/>
-    <arg name="prior_type" value="$(var prior_type)"/>
-    <arg name="use_sim_time" value="$(var use_sim_time)"/>
-    <arg name="process_all" value="$(var process_all)"/>
-  </include>
-  <include file="$(find-pkg-share marker_survey_web)/launch/web.launch.xml">
-    <arg name="map_path" value="$(var site)/marker_map.yaml"/>
-    <arg name="port" value="$(var port)"/>
-    <arg name="use_sim_time" value="$(var use_sim_time)"/>
-  </include>
+  <group>
+    <include file="$(var here)/survey.launch.xml">
+      <arg name="output_dir" value="$(var site)/survey"/>
+      <arg name="image_topic" value="$(var image_topic)"/>
+      <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+      <arg name="process_all" value="$(var process_all)"/>
+      <arg name="start_paused" value="true"/>
+    </include>
+  </group>
+  <group>
+    <include file="$(var here)/localizer.launch.xml">
+      <arg name="marker_map" value="$(var site)/marker_map.yaml"/>
+      <arg name="image_topic" value="$(var image_topic)"/>
+      <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+      <arg name="prior_topic" value="$(var prior_topic)"/>
+      <arg name="prior_type" value="$(var prior_type)"/>
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+      <arg name="process_all" value="$(var process_all)"/>
+    </include>
+  </group>
+  <group>
+    <include file="$(find-pkg-share marker_survey_web)/launch/web.launch.xml">
+      <arg name="map_path" value="$(var site)/marker_map.yaml"/>
+      <arg name="port" value="$(var port)"/>
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    </include>
+  </group>
 </launch>
