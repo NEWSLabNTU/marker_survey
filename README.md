@@ -18,16 +18,17 @@ Both share the detection, the survey (a bundle adjustment of every marker
 and camera pose), the marker map file and the localizer core. A robot adds
 only its launch file and the remapping into its own state estimator.
 
-Status: phases 0 to 2 of [ROADMAP.md](ROADMAP.md) are done: the survey for
+Status: phases 0 to 3 of [ROADMAP.md](ROADMAP.md) are done: the survey for
 wall boards and ceiling markers, in three frame modes, the marker map file,
-the tools and CI. The localizer and the web interface come next.
+the localizer in both modes, the tools and CI. Timing on a Jetson-class
+board is open; adoption by a robot and the web interface come next.
 
 ## Packages
 
 | Package | Contents |
 |---|---|
 | `marker_survey` | `marker_survey.core` (detection, SE(3), the survey and its bundle adjustment, frames, the map file, the report, simulation and rendering; plain Python, no ROS), the survey node, command-line tools |
-| `marker_localizer` | placeholder for the localizer (phase 3) |
+| `marker_localizer` | `marker_localizer.core.localize` (the 3d and planar solvers, covariance, gate; no ROS), the localizer node, its evaluation and scoring tools |
 | `marker_survey_web` | placeholder for the browser interface (phase 5) |
 
 ## Install
@@ -177,9 +178,54 @@ boards with yaw, pitch, roll in radians; a plain list of ceiling markers
 with x, y, z, yaw) convert once with
 `ros2 run marker_survey marker_map_import course ...` or `... ceiling-list ...`.
 
+## Localizing on the markers
+
+The localizer reads the site's `marker_map.yaml` and the camera, and
+publishes `base_frame`'s pose in the map's `frame_id` as
+`geometry_msgs/PoseWithCovarianceStamped` (`~/pose`), stamped with the
+image's capture time, for the robot's state estimator to fuse:
+
+```bash
+ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/my_site/marker_map.yaml \
+    mode:=planar prior_topic:=/odometry/filtered prior_type:=odometry
+```
+
+| `mode` | Fits | For |
+|---|---|---|
+| `planar` | x, y, yaw; z, roll and pitch known (`roll_pitch`: `zero`, `tf` from a level frame such as `odom`, or `imu`) | a robot on a flat floor: ceiling markers, also wall boards |
+| `3d` | the full 6-DoF pose | wall boards; a vehicle whose roll and pitch matter |
+
+- Planar cuts each corner's ray with its own marker's plane from the map
+  (uneven ceilings, tilted boards) and fits x, y and yaw to all corners;
+  3d starts from each marker's IPPE solutions and refines every corner of
+  every marker together. Both use a robust loss and leave out a marker that
+  disagrees with the others.
+- Covariance from the fit: it grows with distance and shrinks with the
+  markers in view, with floors (`min_sd`, `min_sd_deg`); a fix with a
+  position sd over `max_position_sd` (0.25 m) is not published.
+- `prior_topic` (the estimator's pose, `PoseWithCovarianceStamped` or, with
+  `prior_type: odometry`, `Odometry`): fixes farther than `gate_distance`
+  (1 m) or `gate_angle_deg` (15) from it are dropped (a misread id, a moved
+  marker); in 3d it also picks between the two solutions of a lone marker.
+- `enabled` can be switched at run time (`ros2 param set /marker_localizer
+  enabled false`); `~/debug/image` shows the markers used (green, the map's
+  corners projected with the fix as dots, the residual written), left out
+  (orange: outlier, far) or unusable (red), and the fix.
+- `detect_scale: 0.5` finds markers in a half-size image and refines their
+  corners on the full one (a 1920 x 1200 camera); the node logs its
+  detection and fit times every 10 s.
+
+`examples/launch/` has a ceiling robot (planar, an `Odometry` prior) and a
+wall-board vehicle (3d). Without a robot,
+`ci/synthetic_localize.sh ceiling` (or `wall`, `ceiling_gate`) renders a
+recording, plays it through the node and scores the fixes against the truth;
+`marker_localizer_evaluate` runs both modes and the source implementations'
+methods on the same frames without ROS.
+
 ## Tools
 
-Each runs as `ros2 run marker_survey <command>`; `--help` lists the options.
+Each runs as `ros2 run marker_survey <command>` (the last three as
+`ros2 run marker_localizer <command>`); `--help` lists the options.
 
 | Command | Does |
 |---|---|
@@ -190,6 +236,9 @@ Each runs as `ros2 run marker_survey <command>`; `--help` lists the options.
 | `marker_map_check` | validate a map, draw it from above |
 | `marker_map_import` | convert an older site file into `marker_map.yaml` |
 | `marker_plan` | ceiling marker size and spacing from the ceiling height and camera |
+| `marker_localizer` (node) | the localizer |
+| `marker_localizer_evaluate` | both modes and the source methods on a rendered or corner-level scene, no ROS |
+| `marker_localizer_score` | a recording of the localizer's fixes against the truth |
 
 ## Accuracy
 
@@ -204,18 +253,40 @@ marker position error in 3D; the same numbers on Humble and Jazzy):
 | uneven ceiling (2.8 to 3.4 m), tags tilted 6 and 4 deg | `align_to_track` | heights within 2 cm, tilts within 1 deg | heights within 0.7 cm, tilts within 0.12 deg |
 
 Corner-level simulations of the same scenes run as unit tests
-(`test/test_scenes.py`). Not yet measured on a real site (phase 6).
+(`test/test_scenes.py`).
+
+The localizer, base position error against the truth, mean / max
+(details and the comparisons in
+[phase-3-localizer.md](docs/roadmap/phase-3-localizer.md)):
+
+| Scene | Mode | Target | Corner-level, 0.5 px noise | Rendered, through the node |
+|---|---|---|---|---|
+| the office, 9 ceiling tags, 2 laps | `planar` | mean 1 cm, max 3 cm | 0.38 / 2.44 cm | 0.02 / 0.13 cm |
+| the same, two tags in view | `planar` against `3d` | planar within 2 cm, 3d worse | 0.37 cm against 7.3 cm max | 0.03 cm against 0.46 cm max (rendered offline) |
+| the test course, 11 wall boards, one lap | `3d` | no worse than the source's method | 5.4 / 38.6 cm (source method 33.5 / 102 cm) | 0.90 / 7.8 cm (source method, same frames offline: 5.5 / 97 cm) |
+| the office with marker 5 moved 1.5 m | `planar` | rejected by the gate | every fix from it alone rejected | 92 gated, max 0.13 cm |
+
+Per frame on one arm64 server core (CI): 640 x 480 grey, 1.8 ms detection
+and 2.0 ms planar fit (6 % of the core at 15 Hz); 1920 x 1200 colour, 39 ms
+detection (8 ms with `detect_scale` 0.5) and 8 ms 3d fit. A Jetson-class
+board is not measured yet. Not yet measured on a real site
+(phase 6).
 
 ## Development
 
 ```bash
-colcon test --packages-select marker_survey && colcon test-result --verbose
+colcon test && colcon test-result --verbose
 ci/synthetic_survey.sh wall          # in a sourced workspace
+ci/synthetic_localize.sh ceiling     # the localizer through its node
+ci/localizer_comparison.sh wall      # against the source methods, no ROS
+ci/timing.sh                         # detection and fit per frame, one core
 python3 ci/check_words.py --commits  # neutral wording
 ```
 
 CI (GitHub Actions) builds and tests on `ros:humble` and `ros:jazzy`, runs
-the four rendered surveys through the node, and checks the wording.
+the four rendered surveys and the three rendered localizer recordings
+through their nodes, compares the localizer with the source methods, times
+it on an x86 and an arm64 runner, and checks the wording.
 
 ## Licence
 
