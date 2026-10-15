@@ -20,9 +20,11 @@ only its launch file and the remapping into its own state estimator.
 
 Status: phases 0 to 3 of [ROADMAP.md](ROADMAP.md) are done: the survey for
 wall boards and ceiling markers, in three frame modes, the marker map file,
-the localizer in both modes, the tools and CI. Phase 4 has the integration
-guide, [docs/integration.md](docs/integration.md), and two examples that run
-in CI; printing and identifying markers from a browser are in. Timing on a
+the localizer in both modes, the tools and CI. Of phase 4, the integration
+guide, [docs/integration.md](docs/integration.md), and the two examples
+that run in CI are done; the 0.1.0 tag and the move of the source projects
+onto the packages are open. Printing and identifying markers from a browser
+are in. Timing on a
 Jetson-class board is open; the rest of the web interface comes next.
 Changes are in [CHANGELOG.md](CHANGELOG.md).
 
