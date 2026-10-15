@@ -16,7 +16,10 @@ frames in which the markers are seen apart. The survey:
      - pose priors: its absolute pose of every keyframe, weighted by its
        noise (a localizer's map pose; the result stays in its frame).
      Markers seen together correct the drift; markers seen alone still land
-     in the frame.
+     in the frame;
+  4. gives the joint covariance of the markers and of the floor (the mean of
+     the base poses, which the result frame stands on), with the corner noise
+     measured from the solve's own reprojection residuals rather than assumed.
 
 Choosing the frame the result is expressed in is frames.py's job; writing
 it, solve.py's.
@@ -69,7 +72,9 @@ class SurveySettings:
     pose_sd_rot: float = math.radians(1.0)   # [rad]
     # [m] reference track noise, for the uncertainty of an align_to_track result
     track_sd: float = 0.05
-    pixel_sd: float = 0.5              # [px] corner noise
+    pixel_sd: float = 0.5              # [px] corner noise the solve weights the corners by
+    # [px] the covariance uses the corner noise measured in the solve, at least this
+    min_pixel_sd: float = 0.05
     huber_px: float = 1.5              # robust loss scale, in pixel sds
     # scipy least_squares loss. soft_l1 is Huber-like but keeps far-off residuals in the
     # Jacobian; with 'huber' they drop out of it, the start keyframe's constraint can
@@ -89,7 +94,9 @@ class Survey:
         self.keyframes: List[Keyframe] = []
         self.markers: Dict[int, MarkerEstimate] = {}
         self.T_cam_base: Optional[np.ndarray] = None    # camera optical frame -> base frame
-        self.joint_cov = None          # (marker ids, joint covariance) of the last solve
+        # (marker ids, joint covariance) of the last solve: 6 per marker (rotation vector,
+        # translation), then 6 for the floor if T_cam_base is known (FLOOR_PARAMS)
+        self.joint_cov = None
 
     def wants_keyframe(self, T_world_cam: np.ndarray, detections: List[Detection]) -> bool:
         if not detections:
@@ -269,7 +276,21 @@ class Survey:
                 if kf.T_ref_base is not None and kcols(k) is not None:
                     c = kcols(k)
                     extra[c.start + 3:c.start + 6] = 1.0 / s.track_sd ** 2
-        joint = marker_covariances(sol.jac, 6 * nkp, nm, extra)
+        # the corners' noise as measured: a robust spread of the reprojection residuals,
+        # corrected for the parameters fitted to them; the covariance uses it instead of
+        # the assumed pixel_sd (which only weighs the corners against the other factors)
+        npix = 8 * len(obs)
+        dof = max(npix - npar, npix // 2)
+        noise = float(1.4826 * np.median(np.abs(r[:npix])) * math.sqrt(npix / dof)) * s.pixel_sd
+        cov_px = max(noise, s.min_pixel_sd)
+        from scipy.sparse import csr_matrix, diags
+        w = np.ones(nres)
+        w[:npix] = s.pixel_sd / cov_px
+        jac = diags(w) @ csr_matrix(sol.jac)
+        Fk = None
+        if self.T_cam_base is not None:
+            Fk = floor_jacobian(x[:6 * nkp].reshape(-1, 6), self.T_cam_base, nk)
+        joint = marker_covariances(jac, 6 * nkp, nm, extra, Fk)
         self.joint_cov = (ids, joint)
         stats = {}
         for mid in ids:
@@ -280,17 +301,49 @@ class Survey:
                           joint[6 * mi[mid]:6 * mi[mid] + 6, 6 * mi[mid]:6 * mi[mid] + 6]}
         info = {'keyframes': nk, 'observations': len(obs), 'cost': float(sol.cost),
                 'reproj_rms_px': float(np.sqrt(np.mean(proj ** 2))), 'status': str(sol.message),
+                'pixel_noise_px': noise,
                 'factors': ('pose priors' if s.pose_priors else '')
                 + (' + ' if s.pose_priors and odo else '') + ('motion' if odo else '')}
         return markers, poses, stats, info
 
 
-def marker_covariances(jac, off: int, nm: int, extra_diag=None):
+FLOOR_PARAMS = 6      # the floor in the joint covariance: mean base z axis, mean base origin
+
+
+def floor_vector(T_world_base) -> np.ndarray:
+    """The floor's parameters (FLOOR_PARAMS): the mean z axis of the base poses (not
+    normalised) and their mean origin; frames.floor_from_base_poses makes the floor."""
+    return np.concatenate([np.mean([T[:3, 2] for T in T_world_base], axis=0),
+                           np.mean([T[:3, 3] for T in T_world_base], axis=0)])
+
+
+def floor_jacobian(kp: np.ndarray, T_cam_base: np.ndarray, nk: int, eps: float = 1e-6):
+    """d floor_vector / d keyframe parameters (FLOOR_PARAMS x 6 len(kp)); `kp` are the
+    free keyframes' camera poses (rotation vector, translation) out of `nk`."""
+    from scipy.spatial.transform import Rotation
+    zc, tc = T_cam_base[:3, 2], T_cam_base[:3, 3]
+    n = len(kp)
+    F = np.zeros((FLOOR_PARAMS, 6 * n))
+    R0 = Rotation.from_rotvec(kp[:, :3]).as_matrix()
+    for j in range(3):
+        d = kp[:, :3].copy()
+        d[:, j] += eps
+        dR = (Rotation.from_rotvec(d).as_matrix() - R0) / eps          # n x 3 x 3
+        F[:3, j::6] = (dR @ zc).T / nk
+        F[3:, j::6] = (dR @ tc).T / nk
+    for j in range(3):
+        F[3 + j, 3 + j::6] = 1.0 / nk
+    return F
+
+
+def marker_covariances(jac, off: int, nm: int, extra_diag=None, Fk=None):
     """Joint covariance (6 nm x 6 nm; per marker rotvec then translation) of all markers,
     from the Gauss-Newton normal matrix J^T J (plus `extra_diag`, information added
     on the diagonal); None if it is singular. The markers' parameters come last
     (from `off`); the keyframes are eliminated (Schur complement), which keeps the
-    sparse factorisation small: the keyframe block is banded."""
+    sparse factorisation small: the keyframe block is banded. With `Fk` (q x off),
+    linear functions of the keyframe parameters (the floor), their q rows and columns
+    follow the markers'."""
     from scipy.sparse import csc_matrix, diags
     from scipy.sparse.linalg import splu
     J = csc_matrix(jac)
@@ -302,11 +355,17 @@ def marker_covariances(jac, off: int, nm: int, extra_diag=None):
         if off > 0:
             Akk = A[:off, :off].tocsc()
             Akm = A[:off, off:].toarray()
-            X = splu(Akk).solve(Akm)
+            lu = splu(Akk)
+            X = lu.solve(Akm)
             S = Amm - Akm.T @ X
         else:
             S = Amm
         C = np.linalg.inv(S)
+        if Fk is not None and off > 0:
+            FX = Fk @ X
+            Cfm = -FX @ C
+            Cff = Fk @ lu.solve(np.ascontiguousarray(Fk.T)) + FX @ C @ FX.T
+            C = np.block([[C, Cfm.T], [Cfm, Cff]])
     except (RuntimeError, np.linalg.LinAlgError):          # singular
         return None
     if not np.all(np.isfinite(C)):

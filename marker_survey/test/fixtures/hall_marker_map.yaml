@@ -1,0 +1,24 @@
+# A hall of 36 m x 12 m: boards every 6 m along both long walls and two at each
+# end, centres 0.25 m above the floor; marker 20 near the start is the origin.
+# The route is a 24 m x 6 m oval (test_scenes.hall_route).
+version: 1
+frame_id: map
+dictionary: DICT_5X5_1000
+marker_size: 0.38
+mount: wall
+markers:
+  - {id: 0, x: 2.000, y: -3.000, z: 0.250, facing_deg: 135.0}
+  - {id: 1, x: 8.000, y: -3.000, z: 0.250, facing_deg: 135.0}
+  - {id: 2, x: 14.000, y: -3.000, z: 0.250, facing_deg: 135.0}
+  - {id: 3, x: 20.000, y: -3.000, z: 0.250, facing_deg: 135.0}
+  - {id: 4, x: 26.000, y: -3.000, z: 0.250, facing_deg: 135.0}
+  - {id: 5, x: 24.000, y: 9.000, z: 0.250, facing_deg: -45.0}
+  - {id: 6, x: 18.000, y: 9.000, z: 0.250, facing_deg: -45.0}
+  - {id: 7, x: 12.000, y: 9.000, z: 0.250, facing_deg: -45.0}
+  - {id: 8, x: 6.000, y: 9.000, z: 0.250, facing_deg: -45.0}
+  - {id: 9, x: 0.000, y: 9.000, z: 0.250, facing_deg: -45.0}
+  - {id: 10, x: 31.000, y: 1.000, z: 0.250, facing_deg: 180.0}
+  - {id: 11, x: 31.000, y: 5.000, z: 0.250, facing_deg: 180.0}
+  - {id: 12, x: -4.000, y: 5.000, z: 0.250, facing_deg: 0.0}
+  - {id: 13, x: -4.000, y: 1.000, z: 0.250, facing_deg: 0.0}
+  - {id: 20, x: 5.000, y: -3.000, z: 0.250, facing_deg: 135.0}

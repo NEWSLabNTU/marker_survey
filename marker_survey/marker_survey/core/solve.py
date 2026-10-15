@@ -24,7 +24,7 @@ from marker_survey.core import marker_map as mm
 from marker_survey.core import report as rp
 from marker_survey.core.detection import Detection, marker_pose_in_camera
 from marker_survey.core.se3 import T_from_params, inv_T, matrix_to_rotvec, params_from_T
-from marker_survey.core.survey import Keyframe, Survey, SurveySettings
+from marker_survey.core.survey import FLOOR_PARAMS, Keyframe, Survey, SurveySettings, floor_vector
 
 MAP_FILE = 'marker_map.yaml'
 REPORT_FILE = 'survey_report.yaml'
@@ -55,7 +55,8 @@ def finish(survey: Survey, frame: fr.FrameSettings, dictionary: str, output_dir:
             markers, poses, stats, info = survey.solve(max_nfev=max_nfev)
         finally:
             survey.s.track_sd = track_sd
-        log(f'solved: reprojection RMS {info["reproj_rms_px"]:.2f} px ({info["status"]})')
+        log(f'solved: reprojection RMS {info["reproj_rms_px"]:.2f} px, corner noise '
+            f'{info["pixel_noise_px"]:.2f} px ({info["status"]})')
     base = [T @ survey.T_cam_base for T in poses]
     floor_p, floor_n = fr.floor_from_base_poses(base, frame.floor_offset)
     frame_info = {'mode': frame.mode, 'frame_id': frame.frame_id}
@@ -80,9 +81,20 @@ def finish(survey: Survey, frame: fr.FrameSettings, dictionary: str, output_dir:
     if frame.floor_offset:
         frame_info['floor_offset'] = float(frame.floor_offset)
     sizes = {mid: survey.s.size_of(mid) for mid in markers}
-    for mid, C in target_covariances(survey, markers, T_tw, frame, floor_p, floor_n).items():
+    for mid, (C, Cr) in target_covariances(survey, markers, T_tw, frame, base).items():
         stats[mid]['cov_target'] = C
+        stats[mid]['cov_relative'] = Cr
     surveyed = rp.surveyed_markers(markers, stats, T_tw, sizes, floor_p, floor_n, report_settings)
+    frame_sds = [m.frame_sd_xy for m in surveyed if m.frame_sd_xy is not None]
+    if frame_sds:
+        frame_info['frame_sd_xy_max_cm'] = round(max(frame_sds) * 100, 2)
+        rel = [m.sd_xy for m in surveyed if m.sd_xy is not None]
+        if frame.mode == 'origin_marker' and rel and max(frame_sds) > 2 * max(rel):
+            log(f'in the frame of origin marker {frame.origin_marker}, the markers are known to '
+                f'{max(frame_sds) * 100:.1f} cm (1-sigma), among each other to '
+                f'{max(rel) * 100:.1f} cm: the origin marker\'s facing turns the far ones. '
+                'Harmless for localizing on this map; to tie the frame tighter, pass the origin '
+                'marker from more places, or choose one in the middle of the site')
     start = rp.start_pose_in(T_tw, base[0])
     log(rp.format_table(surveyed))
     for m in surveyed:
@@ -116,45 +128,96 @@ def finish(survey: Survey, frame: fr.FrameSettings, dictionary: str, output_dir:
             'written': written}
 
 
-def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, floor_p, floor_n):
-    """6x6 covariance (rotation, translation) of every marker in the result frame. In
-    origin_marker mode the frame moves with the origin marker, so the uncertainty is
-    relative to it (the floor, from many poses, is taken as exact)."""
+def target_covariances(survey: Survey, markers, T_tw, frame: fr.FrameSettings, base_poses):
+    """6x6 covariances (rotation, translation) of every marker in the result frame:
+    {id: (in the frame, relative)}.
+
+    In the frame: what the frame's definition adds included. In origin_marker mode
+    the frame moves with the origin marker and with the floor (the base poses), so a
+    small error of the origin marker's facing turns every far marker about it.
+
+    Relative: the same with a common shift and turn about the vertical of the whole
+    map taken out (an S-transformation to the markers' centroid): how well each marker
+    sits among the others, what driving past it again improves, and what a robot
+    localizing on the map feels. The verdicts use this one."""
     if survey.joint_cov is None or survey.joint_cov[1] is None:
         return {}
     ids, C = survey.joint_cov
+    nm = len(ids)
     idx = {m: i for i, m in enumerate(ids)}
+    has_floor = C.shape[0] == 6 * nm + FLOOR_PARAMS
     origin = frame.origin_marker if frame.mode == 'origin_marker' else None
+    y0 = np.concatenate([params_from_T(markers[m]) for m in ids]
+                        + ([floor_vector(base_poses)] if has_floor else []))
 
-    def frame_of(xo):
+    def frame_of(y):
         if origin is None:
             return T_tw
-        return inv_T(fr.origin_marker_frame(T_from_params(xo), floor_p, floor_n))
+        o = T_from_params(y[6 * idx[origin]:6 * idx[origin] + 6])
+        if has_floor:
+            f = y[6 * nm:]
+            n = f[:3] / np.linalg.norm(f[:3])
+            p = f[3:] - float(frame.floor_offset) * n
+        else:
+            p, n = fr.floor_from_base_poses(base_poses, frame.floor_offset)
+        return inv_T(fr.origin_marker_frame(o, p, n))
 
-    out = {}
+    F0 = frame_of(y0)
+    T_hat = {m: F0 @ markers[m] for m in ids}
+
+    def g(y, F, i):
+        m = ids[i]
+        T = F @ T_from_params(y[6 * i:6 * i + 6])
+        return np.concatenate([matrix_to_rotvec(T_hat[m][:3, :3].T @ T[:3, :3]), T[:3, 3]])
+
+    g0 = np.concatenate([g(y0, F0, i) for i in range(nm)])
+    G = np.zeros((6 * nm, len(y0)))
     eps = 1e-6
-    for mid in ids:
-        xm = params_from_T(markers[mid])
-        xo = params_from_T(markers[origin]) if origin is not None else None
-        T_hat = frame_of(xo) @ markers[mid]
+    frame_cols = set()
+    if origin is not None:
+        frame_cols = set(range(6 * idx[origin], 6 * idx[origin] + 6))
+        if has_floor:
+            frame_cols |= set(range(6 * nm, len(y0)))
+    for j in range(len(y0)):
+        y = y0.copy()
+        y[j] += eps
+        if j in frame_cols:
+            F = frame_of(y)
+            G[:, j] = (np.concatenate([g(y, F, i) for i in range(nm)]) - g0) / eps
+        elif j < 6 * nm:
+            i = j // 6
+            G[6 * i:6 * i + 6, j] = (g(y, F0, i) - g0[6 * i:6 * i + 6]) / eps
+    Ct = G @ C @ G.T
+    Cr = relative_covariance(Ct, [T_hat[m] for m in ids])
+    return {m: (Ct[6 * i:6 * i + 6, 6 * i:6 * i + 6],
+                None if Cr is None else Cr[6 * i:6 * i + 6, 6 * i:6 * i + 6])
+            for i, m in enumerate(ids)}
 
-        def f(x):
-            m = T_from_params(x[:6])
-            o = x[6:] if len(x) > 6 else (x[:6] if mid == origin else xo)
-            T = frame_of(o) @ m
-            return np.concatenate([matrix_to_rotvec(T_hat[:3, :3].T @ T[:3, :3]), T[:3, 3]])
 
-        blocks = [idx[mid]] + ([idx[origin]] if origin is not None and mid != origin else [])
-        x0 = np.concatenate([xm] + ([xo] if len(blocks) > 1 else []))
-        f0 = f(x0)
-        J = np.zeros((6, len(x0)))
-        for j in range(len(x0)):
-            dx = np.zeros(len(x0))
-            dx[j] = eps
-            J[:, j] = (f(x0 + dx) - f0) / eps
-        sel = np.concatenate([np.arange(6 * b, 6 * b + 6) for b in blocks])
-        out[mid] = J @ C[np.ix_(sel, sel)] @ J.T
-    return out
+def relative_covariance(C, poses):
+    """The joint covariance `C` (6 per marker: local rotation vector, translation) with
+    a common shift and turn about z of all markers taken out: the S-transformation to
+    the minimum trace of the positions. None with fewer than three markers."""
+    nm = len(poses)
+    if nm < 3:
+        return None
+    H = np.zeros((6 * nm, 4))
+    c = np.mean([T[:3, 3] for T in poses], axis=0)
+    z = np.array([0.0, 0.0, 1.0])
+    for i, T in enumerate(poses):
+        H[6 * i + 3:6 * i + 6, :3] = np.eye(3)
+        H[6 * i + 3:6 * i + 6, 3] = np.cross(z, T[:3, 3] - c)
+        H[6 * i:6 * i + 3, 3] = T[:3, :3].T @ z
+    W = np.zeros(6 * nm)
+    for i in range(nm):
+        W[6 * i + 3:6 * i + 6] = 1.0
+    HtW = H.T * W
+    try:
+        S = np.eye(6 * nm) - H @ np.linalg.solve(HtW @ H, HtW)
+    except np.linalg.LinAlgError:
+        return None
+    out = S @ C @ S.T
+    return 0.5 * (out + out.T)
 
 
 def _single_keyframe(survey: Survey):

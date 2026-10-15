@@ -251,9 +251,12 @@ as published and ignore the entries with variance 1000 in planar mode.
    (or `/marker_localizer/debug/image`): every marker on the sheet is
    outlined; red means too small or cut by the border.
 6. **The survey's result.** `survey_report.yaml`: per marker the views,
-   reprojection RMS, 1-sigma position, height and angle, and a verdict;
-   drive past the markers marked `pass again` once more, closer, and save
-   again. `marker_survey_compare` compares the map with a tape survey of a
+   reprojection RMS, 1-sigma position, height and angle (relative to the
+   other markers), and a verdict; drive past the markers marked
+   `pass again` once more, closer, and save again. `frame_sd_xy_cm` is the
+   1-sigma in the result frame; in `origin_marker` mode it grows with the
+   distance from the origin marker, and passing the origin marker from
+   more places, or choosing one in the middle of the site, shrinks it. `marker_survey_compare` compares the map with a tape survey of a
    few markers; in `align_to_track` the report's `frame.fit_rms_m` should be
    about the localizer's own noise.
 7. **The localizer.** A status line every 10 s: images, fixes, rejected,

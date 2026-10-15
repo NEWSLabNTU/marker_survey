@@ -116,3 +116,43 @@ def test_report_verdicts():
     assert marker(sd_xy=0.2).verdict == 'bad'
     assert marker('wall', height_above_floor=-0.1).verdict == 'bad'
     assert marker('wall', height_above_floor=0.1).verdict == 'pass again'
+
+
+def hall_route():
+    """A 24 m x 6 m oval: two straights and two turns of 3 m radius, from (0, 0) heading +x."""
+    import math
+    pts = [(x * 0.25, 0.0) for x in range(96)]
+    pts += [(24 + 3 * math.cos(a), 3 + 3 * math.sin(a))
+            for a in np.linspace(-math.pi / 2, math.pi / 2, 38, endpoint=False)]
+    pts += [(24 - x * 0.25, 6.0) for x in range(96)]
+    pts += [(3 * math.cos(a), 3 + 3 * math.sin(a))
+            for a in np.linspace(math.pi / 2, 3 * math.pi / 2, 38, endpoint=False)]
+    return pts
+
+
+def test_uncertainty_tracks_the_real_error_in_a_long_hall():
+    """The 1-sigma follows the real error: the verdicts use the relative one (the map
+    among itself), and the one in the origin marker's frame, larger far from the
+    origin, is reported beside it. The corner noise is measured, not assumed."""
+    m = mm.load(os.path.join(os.path.dirname(__file__), 'fixtures', 'hall_marker_map.yaml'))
+    res = survey(m, hall_route(), sim.forward_camera(), 'origin_marker', laps=1, step=0.1,
+                 sweeps=4, origin=20)
+    assert res['info']['pixel_noise_px'] == pytest.approx(0.3, rel=0.2)
+    T = inv_T(fr.origin_marker_frame(m.pose_of(20), np.zeros(3), np.array([0, 0, 1.0])))
+    truth = truth_map(m, T, '')
+    rows, _ = errors(res, truth)
+    ms = res['markers']
+    assert all(x.verdict == 'good' for x in ms), [(x.id, x.flags) for x in ms]
+    # relative: the error left after the best shift and turn of the whole map
+    from scipy.optimize import least_squares
+    from marker_survey.core.se3 import rot_z
+    got = np.array([[x.x, x.y, x.z] for x in ms])
+    want = np.array([truth.by_id()[x.id].position for x in ms])
+    fit = least_squares(lambda q: (got @ rot_z(q[0]).T + q[1:] - want).ravel(), np.zeros(4))
+    rel = np.linalg.norm((got @ rot_z(fit.x[0]).T + fit.x[1:] - want)[:, :2], axis=1)
+    z_rel = rel / np.array([x.sd_xy for x in ms])
+    z_frame = np.array([rows[x.id]['horiz'] / x.frame_sd_xy for x in ms if x.id != 20])
+    assert 0.3 < np.median(z_rel) < 2.0 and z_rel.max() < 4.0, z_rel
+    assert 0.3 < np.median(z_frame) < 2.0 and z_frame.max() < 4.0, z_frame
+    assert max(x.frame_sd_xy for x in ms) > 2 * max(x.sd_xy for x in ms)
+    assert res['report']['frame']['frame_sd_xy_max_cm'] > 0

@@ -58,6 +58,27 @@ browser (phase 5).
   map steps in Chromium (Playwright) on simulated recordings; CI job
   `web-browser`.
 
+### Fixes from the first project moved onto 0.1.0
+
+- Survey verdicts: the 1-sigma values were far too large (a 36 m hall:
+  14 to 55 cm where the real errors were 1 to 13 cm, every marker `bad` or
+  `pass again`; the wall course: 7 of 11 `pass again` at 4 to 6 cm, real
+  errors at most 1.5 cm). Three causes: the covariance assumed the solve's
+  0.5 px corner noise where rendered and real corners are several times
+  better; in `origin_marker` mode the floor was taken as exact while the
+  markers' heights carried the odometry's drift; and the origin marker's
+  facing, which turns every far marker about it, counted against each
+  marker. Now the corner noise is measured from the solve's residuals
+  (robust spread, at least `min_pixel_sd`, 0.05 px; reported as
+  `solve.pixel_noise_px`), the floor's uncertainty enters with the
+  markers', and the per-marker `sd_xy_cm`, `sd_z_cm` and `sd_angle_deg`,
+  which the verdicts use, are relative to the other markers (a common
+  shift and turn about the vertical taken out). New in the report:
+  `frame_sd_xy_cm` and `frame_sd_z_cm` per marker (the 1-sigma in the
+  result frame, frame definition included) and `frame.frame_sd_xy_max_cm`;
+  the log says when the origin marker's facing dominates. Both now follow
+  the real errors on the CI recordings (error / 1-sigma about 1).
+
 ## 0.1.0 (2026-10-15)
 
 The first release: the survey, the marker map file and the localizer for

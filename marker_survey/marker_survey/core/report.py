@@ -1,7 +1,13 @@
 """The survey's result per marker, its flags and verdict, and survey_report.yaml. No ROS.
 
 Per marker: views, reprojection RMS, 1-sigma position (horizontal and
-height) and angle, the tilt from its mount, flags, and a one-line verdict:
+height) and angle, the tilt from its mount, flags, and a one-line verdict.
+The 1-sigma values are relative: how well the marker sits among the others,
+with a common shift and turn of the whole map taken out (what driving past
+it again improves, and what a robot localizing on the map feels). The same
+in the result frame, which adds the frame's own uncertainty (in
+origin_marker mode the origin marker's facing, turning far markers about
+it), is reported beside them as frame_sd_*; the verdict does not use it.
 
   good        nothing to do;
   pass again  usable, but seen too few times or too uncertain: drive past it
@@ -47,6 +53,8 @@ class SurveyedMarker:
     sd_xy: Optional[float] = None      # [m] 1-sigma, worst horizontal direction
     sd_z: Optional[float] = None       # [m] 1-sigma height
     sd_angle_deg: Optional[float] = None   # 1-sigma, worst rotation axis
+    frame_sd_xy: Optional[float] = None    # [m] the same in the result frame (not judged)
+    frame_sd_z: Optional[float] = None
     flags: List[str] = field(default_factory=list)
     verdict: str = GOOD
     hint: str = ''
@@ -84,21 +92,31 @@ def surveyed_markers(markers_world: Dict[int, np.ndarray], stats: dict, T_target
                             float(st.get('reproj_rms_px', float('nan'))),
                             mm.tilt_from_mount(mount, T[:3, :3]),
                             float((T[:3, 3] - fp) @ fn))
-        C = st.get('cov_target')
-        if C is None and st.get('cov_world') is not None:
+        Cf = st.get('cov_target')
+        if Cf is None and st.get('cov_world') is not None:
             Cw = st['cov_world']
-            C = np.zeros((6, 6))
-            C[:3, :3] = Cw[:3, :3]
-            C[3:, 3:] = R @ Cw[3:, 3:] @ R.T
+            Cf = np.zeros((6, 6))
+            Cf[:3, :3] = Cw[:3, :3]
+            Cf[3:, 3:] = R @ Cw[3:, 3:] @ R.T
+        C = st.get('cov_relative')
+        if C is None:
+            C = Cf
         if C is not None:
-            Ct = C[3:, 3:]
-            sm.sd_xy = float(math.sqrt(max(np.linalg.eigvalsh(Ct[:2, :2]).max(), 0.0)))
-            sm.sd_z = float(math.sqrt(max(Ct[2, 2], 0.0)))
-            Cr = C[:3, :3]
-            sm.sd_angle_deg = float(math.degrees(math.sqrt(max(np.linalg.eigvalsh(Cr).max(), 0.0))))
+            sm.sd_xy, sm.sd_z, sm.sd_angle_deg = _sds(C)
+        if Cf is not None:
+            sm.frame_sd_xy, sm.frame_sd_z, _ = _sds(Cf)
         judge(sm, st_)
         out.append(sm)
     return out
+
+
+def _sds(C):
+    """1-sigma (worst horizontal [m], height [m], worst rotation axis [deg]) of a 6x6
+    covariance (rotation, translation)."""
+    Ct = C[3:, 3:]
+    return (float(math.sqrt(max(np.linalg.eigvalsh(Ct[:2, :2]).max(), 0.0))),
+            float(math.sqrt(max(Ct[2, 2], 0.0))),
+            float(math.degrees(math.sqrt(max(np.linalg.eigvalsh(C[:3, :3]).max(), 0.0)))))
 
 
 def judge(sm: SurveyedMarker, s: ReportSettings):
@@ -200,6 +218,8 @@ def report_dict(surveyed: List[SurveyedMarker], info: dict, frame: dict, diction
             'sd_xy_cm': None if s.sd_xy is None else _r(s.sd_xy * 100, 2),
             'sd_z_cm': None if s.sd_z is None else _r(s.sd_z * 100, 2),
             'sd_angle_deg': _r(s.sd_angle_deg, 3),
+            'frame_sd_xy_cm': None if s.frame_sd_xy is None else _r(s.frame_sd_xy * 100, 2),
+            'frame_sd_z_cm': None if s.frame_sd_z is None else _r(s.frame_sd_z * 100, 2),
             'flags': s.flags} for s in surveyed],
     }
 

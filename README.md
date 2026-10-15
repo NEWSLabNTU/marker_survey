@@ -99,7 +99,12 @@ course and a ceiling, through their own launch files the same way.
    - `marker_map.yaml`: the markers (below);
    - `survey_report.yaml`: per marker the views, reprojection RMS, 1-sigma
      position, height and angle, flags and a verdict (`good`, `pass again`,
-     `bad`);
+     `bad`). The 1-sigma values are relative: how well the marker sits among
+     the others, with a common shift and turn of the whole map taken out;
+     the verdicts use them. `frame_sd_xy_cm` and `frame_sd_z_cm` are the
+     same in the result frame, which in `origin_marker` mode adds the origin
+     marker's facing (far markers turn with it). The corner noise behind
+     both is measured from the solve (`solve.pixel_noise_px`), not assumed;
    - `survey_data.npz`: the recording, to solve again without the robot:
      `ros2 run marker_survey marker_survey_solve my_site/survey_data.npz --output-dir my_site`.
 
