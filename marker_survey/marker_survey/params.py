@@ -99,6 +99,7 @@ PARAMETERS = {
     'rate': 5.0,
     'process_all': False,
     'pose_tolerance': 0.1,
+    'max_pose_gap': 0.5,
     'save_on_exit': True,
     'keyframe_distance': 0.15,
     'keyframe_angle_deg': 5.0,

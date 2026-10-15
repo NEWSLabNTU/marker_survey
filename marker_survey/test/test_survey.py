@@ -288,3 +288,22 @@ def test_a_marker_below_the_floor_is_bad():
                  log=quiet)
     assert all(m.z < 0 and m.verdict == 'bad' and any('BELOW the floor' in f for f in m.flags)
                for m in res['markers'])
+
+
+def test_a_lost_odometry_message_does_not_lose_the_frame():
+    """The camera pose at an image's stamp comes from the odometry around it: across a
+    lost message (a gap of two intervals) it is interpolated; only a long gap, or a
+    stamp the odometry has not reached, gives none (the frame then waits)."""
+    from marker_survey.core.se3 import make_T, pose_at_stamp, rot_z
+    ts = [k / 9.0 for k in range(20)]
+    Ts = [make_T(rot_z(0.1 * t), [0.3 * t, 0.0, 0.0]) for t in ts]
+    del ts[9], Ts[9]                                    # one message lost
+    t = 9.4 / 9.0
+    T = pose_at_stamp(ts, Ts, t, 0.1, 0.5)
+    assert T is not None and abs(T[0, 3] - 0.3 * t) < 1e-9
+    assert pose_at_stamp(ts, Ts, 1.0, 0.1, 0.0) is None          # the old rule: dropped
+    assert pose_at_stamp(ts, Ts, ts[-1] + 0.05, 0.1, 0.5) is Ts[-1]
+    assert pose_at_stamp(ts, Ts, ts[-1] + 0.5, 0.1, 0.5) is None  # not there yet: wait
+    del ts[5:12], Ts[5:12]                               # a long gap
+    assert pose_at_stamp(ts, Ts, 8.0 / 9.0, 0.1, 0.5) is None
+    assert pose_at_stamp([], [], 1.0, 0.1, 0.5) is None

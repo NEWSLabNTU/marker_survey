@@ -17,9 +17,10 @@ common=(--ros-args -p use_sim_time:=true -p output_dir:=$PWD/$out/result -p rate
 
 case $scene in
   wall)
-    # 11 boards around the test course, forward camera, one lap at 3 Hz
+    # 11 boards around the test course, forward camera, one lap at 3 Hz; 3 % of the
+    # odometry messages lost, which must not lose a frame
     gen=(--map $wall/test_course/marker_map.yaml --route $wall/test_course/route.csv
-         --camera forward --origin 10 --laps 1 --sweeps 4 --rate 3)
+         --camera forward --origin 10 --laps 1 --sweeps 4 --rate 3 --drop-odom 0.03)
     node=(-p dictionary:=DICT_5X5_1000 -p marker_size:=0.38 -p pose_source:=odometry
           -p frame.mode:=origin_marker -p frame.origin_marker:=10)
     truth=truth_origin.yaml
@@ -72,4 +73,7 @@ timeout 600 ros2 service call /marker_survey/save std_srvs/srv/Trigger | tail -2
 stop $node_pid
 trap - EXIT
 grep -E 'solved|aligned|keyframes,' "$out/node.log" | tail -3 || true
+if grep -E 'dropped: no camera pose' "$out/node.log"; then
+  echo "FAIL: frames dropped for want of a camera pose"; exit 1
+fi
 ros2 run marker_survey marker_survey_compare "$out/result/marker_map.yaml" "$out/$truth" "${limits[@]}"

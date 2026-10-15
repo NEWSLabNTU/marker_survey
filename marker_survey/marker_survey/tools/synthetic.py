@@ -100,6 +100,8 @@ def parse_args(argv=None):
                     help='[m] sd per horizontal axis of the map -> base_link pose')
     ap.add_argument('--map-noise-yaw-deg', type=float, default=0.0)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--drop-odom', type=float, default=0.0,
+                    help='share of the /odom messages left out (lost messages), seeded')
     ap.add_argument('--start-time', type=float, default=1_000_000_000.0,
                     help='[s] the stamp the recording starts at; a later one for a second drive '
                          'played after the first')
@@ -205,6 +207,7 @@ def main(argv=None):
         writers[2].write('/tf_static', ser.serialize_message(static), split_ns)
 
     odo_div = 3                        # odometry 3x the camera rate
+    drop_rng = np.random.default_rng(args.seed + 3000)
     dt = 1.0 / args.rate
     truth_rows = []
     prior_var = [max(args.map_noise, 0.01) ** 2, max(math.radians(args.map_noise_yaw_deg), 0.005) ** 2]
@@ -222,7 +225,8 @@ def main(argv=None):
              o.pose.pose.position.z) = (float(v) for v in Tj[:3, 3])
             (o.pose.pose.orientation.x, o.pose.pose.orientation.y, o.pose.pose.orientation.z,
              o.pose.pose.orientation.w) = (float(v) for v in matrix_to_quat(Tj[:3, :3]))
-            put('/odom', ser.serialize_message(o), ns(tj))
+            if not (args.drop_odom and k > 0 and drop_rng.random() < args.drop_odom):
+                put('/odom', ser.serialize_message(o), ns(tj))
             tf = [tfs('odom', 'base_link', Tj, tj)]
             if j == odo_div:
                 T_map_odom = f.T_mapmeas_base @ inv_T(f.T_odom_base)

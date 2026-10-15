@@ -55,7 +55,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from marker_survey.core import live
 from marker_survey.core.detection import Detector
-from marker_survey.core.se3 import interpolate_T, make_T, matrix_to_quat, quat_to_matrix
+from marker_survey.core.se3 import make_T, matrix_to_quat, pose_at_stamp, quat_to_matrix
 from marker_survey.core.solve import DATA_FILE, MAP_FILE, REPORT_FILE, finish, save_dump
 from marker_survey.core.survey import Survey
 from marker_survey.params import PARAMETERS, SurveyParams
@@ -102,6 +102,7 @@ class MarkerSurveyNode(Node):
         self.compressed = bool(gp('compressed'))
         self.odom_topic = gp('odom_topic')
         self.pose_tol = float(gp('pose_tolerance'))
+        self.max_pose_gap = float(gp('max_pose_gap'))
         self.save_on_exit = bool(gp('save_on_exit'))
         self.origin = p.frame.origin_marker
 
@@ -266,19 +267,9 @@ class MarkerSurveyNode(Node):
                                        throttle_duration_sec=5.0)
                 return None
         od = list(self.odom)
-        ts = np.array([o[0] for o in od])
-        i = int(np.searchsorted(ts, t))
-        if i == 0 or i >= len(od):
-            j = 0 if i == 0 else len(od) - 1
-            if abs(ts[j] - t) > self.pose_tol:
-                return None
-            T = od[j][1]
-        else:
-            t0, t1 = ts[i - 1], ts[i]
-            if t1 - t0 > 2 * self.pose_tol:
-                return None
-            T = interpolate_T(od[i - 1][1], od[i][1], (t - t0) / max(t1 - t0, 1e-9))
-        return T @ self.T_child_cam
+        T = pose_at_stamp([o[0] for o in od], [o[1] for o in od], t, self.pose_tol,
+                          self.max_pose_gap)
+        return None if T is None else T @ self.T_child_cam
 
     # ------------------------------------------------------------ work
     def on_tick(self):
@@ -465,7 +456,8 @@ class MarkerSurveyNode(Node):
             dump = os.path.join(self.p.output_dir, DATA_FILE)
             save_dump(dump, self.survey, self.p.dictionary, self.p.frame)
             log = self.get_logger().info
-            log(f'wrote {dump}')
+            log(f'wrote {dump}; {self.frames} frames surveyed'
+                + (f', {self.no_pose} dropped: no camera pose' if self.no_pose else ''))
             try:
                 res = finish(self.survey, self.p.frame, self.p.dictionary, self.p.output_dir,
                              log=lambda s: [log(line) for line in str(s).splitlines()])

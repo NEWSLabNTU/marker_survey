@@ -95,6 +95,14 @@ browser (phase 5).
   so its values win; default `config/no_params.yaml`, which sets none).
   `survey.launch.xml` takes `param_file` too. A robot project can include
   the stock launch files instead of starting the nodes itself.
+- Survey node: parameter `max_pose_gap` (0.5 s): the odometry is
+  interpolated across gaps up to this, so a lost odometry message no
+  longer drops the frames in its gap (before, any gap over twice
+  `pose_tolerance` did; on a recording that cost a keyframe and once failed
+  a CI limit). The save logs how many frames were dropped.
+  `marker_survey_synthetic --drop-odom F` leaves out a share of the
+  odometry messages; `ci/synthetic_survey.sh wall` drops 3 % and fails on
+  any frame dropped.
 - `marker_map_import` rounds the angles it converts from radians within
   the source's own precision, by at most 0.005 deg: 0.5236 rad is
   `facing_deg: 30.0`, no longer 30.00007. Its check against the source

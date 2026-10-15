@@ -105,7 +105,8 @@ the ones marked with an argument of the same name, `frame.mode` as
 | `floor_offset` | 0.0 | yes | [m] how far the floor lies below `base_frame` |
 | `rate` | 5.0 | | [Hz] how often queued frames are processed |
 | `process_all` | false | yes | every frame in order over a reliable subscription (recordings); live, only the newest frame |
-| `pose_tolerance` | 0.1 | | [s] largest gap of the odometry around an image's stamp |
+| `pose_tolerance` | 0.1 | | [s] an image before the first or after the last odometry message takes the nearest one within this |
+| `max_pose_gap` | 0.5 | | [s] the odometry is interpolated at an image's stamp across gaps up to this (lost messages); a frame whose odometry has not arrived yet waits for it |
 | `save_on_exit` | true | | solve and write on Ctrl-C if `~/save` was not called |
 | `keyframe_distance` | 0.15 | | [m] a new keyframe after this much motion ... |
 | `keyframe_angle_deg` | 5.0 | | ... or this much rotation, or a new marker |

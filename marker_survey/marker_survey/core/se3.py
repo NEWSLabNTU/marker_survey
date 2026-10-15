@@ -80,6 +80,24 @@ def interpolate_T(Ta, Tb, f: float) -> np.ndarray:
     return make_T(R, (1 - f) * Ta[:3, 3] + f * Tb[:3, 3])
 
 
+def pose_at_stamp(stamps, poses, t: float, tolerance: float, max_gap: float):
+    """The pose at stamp t from a track of (sorted) stamps and poses: interpolated
+    between its neighbours when they are at most max_gap apart (a lost message
+    leaves a gap of two intervals), else the nearest one within tolerance; None
+    when there is none (the track has not reached t yet, or a long gap)."""
+    ts = np.asarray(stamps, float)
+    if len(ts) == 0:
+        return None
+    i = int(np.searchsorted(ts, t))
+    if 0 < i < len(ts):
+        t0, t1 = ts[i - 1], ts[i]
+        if t1 - t0 <= max(max_gap, 2 * tolerance):
+            return interpolate_T(poses[i - 1], poses[i], (t - t0) / max(t1 - t0, 1e-9))
+    near = [j for j in (i - 1, i) if 0 <= j < len(ts)]
+    j = min(near, key=lambda j: abs(ts[j] - t))
+    return poses[j] if abs(ts[j] - t) <= tolerance else None
+
+
 def rotation_angle(Ra, Rb) -> float:
     """Angle [rad] of the rotation between two orientations."""
     c = (np.trace(np.asarray(Ra).T @ np.asarray(Rb)) - 1.0) / 2.0
