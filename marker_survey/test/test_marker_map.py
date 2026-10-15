@@ -11,7 +11,9 @@ from marker_survey.tools import map_check
 
 HERE = os.path.dirname(__file__)
 SCHEMA = os.path.join(HERE, '..', 'schema', 'marker_map.schema.json')
-SITES = os.path.join(HERE, '..', '..', 'examples', 'sites')
+EXAMPLES = os.path.join(HERE, '..', '..', 'examples')
+SITES = {name: os.path.join(EXAMPLES, example, 'sites', name) for example, name in (
+    ('wall_course', 'test_course'), ('ceiling', 'office'), ('ceiling', 'office_uneven'))}
 
 CEILING = """\
 # Ceiling markers of the warehouse.
@@ -137,7 +139,7 @@ def test_the_writer_aligns_columns_and_keeps_full_precision():
 
 @pytest.mark.parametrize('site', ['test_course', 'office', 'office_uneven'])
 def test_the_example_sites_are_in_the_writers_layout(site):
-    path = os.path.join(SITES, site, 'marker_map.yaml')
+    path = os.path.join(SITES[site], 'marker_map.yaml')
     with open(path) as f:
         text = f.read()
     assert mm.dumps(mm.load(path)) == text
@@ -188,7 +190,7 @@ def test_the_schema_accepts_the_examples_and_refuses_a_wrong_angle():
     with open(SCHEMA) as f:
         schema = json.load(f)
     for site in ('test_course', 'office', 'office_uneven'):
-        with open(os.path.join(SITES, site, 'marker_map.yaml')) as f:
+        with open(os.path.join(SITES[site], 'marker_map.yaml')) as f:
             jsonschema.validate(yaml.safe_load(f), schema)
     jsonschema.validate(yaml.safe_load(CEILING), schema)
     bad = yaml.safe_load(CEILING.replace('rotation_deg:  45.8}', 'facing_deg: 45.8}'))

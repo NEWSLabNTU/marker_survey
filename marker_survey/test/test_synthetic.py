@@ -8,7 +8,7 @@ from marker_survey.core.path_csv import load_path_csv
 from marker_survey.tools.synthetic import parse_args, scene, truth_map
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
-SITE = os.path.join(ROOT, 'examples', 'sites', 'test_course')
+SITE = os.path.join(ROOT, 'examples', 'wall_course', 'sites', 'test_course')
 
 
 def test_a_recording_needs_only_a_marker_map_and_a_route(tmp_path):

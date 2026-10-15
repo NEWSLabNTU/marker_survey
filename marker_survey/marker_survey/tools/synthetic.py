@@ -21,8 +21,8 @@ truth_origin.yaml (in the frame of that marker, what origin_marker gives), and
 truth_poses.csv (stamp and true base_link pose in the map of every image, to
 score a localizer).
 
-    marker_survey_synthetic OUT --map examples/sites/test_course/marker_map.yaml \\
-        --route examples/sites/test_course/route.csv --camera forward --origin 10
+    marker_survey_synthetic OUT --map examples/wall_course/sites/test_course/marker_map.yaml \\
+        --route examples/wall_course/sites/test_course/route.csv --camera forward --origin 10
 """
 
 import argparse

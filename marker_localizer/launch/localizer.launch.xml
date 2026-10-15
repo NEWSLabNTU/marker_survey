@@ -2,7 +2,7 @@
 <!--
   The marker localizer node alone. The camera driver, the robot's TF
   (base_frame to the camera) and the state estimator come from the robot's own
-  launch files; examples/launch shows two setups.
+  launch files; examples/wall_course and examples/ceiling show two setups.
 
     ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/site/marker_map.yaml mode:=planar
 

@@ -2,12 +2,12 @@
 <!--
   The marker survey node alone. The camera driver, the pose source and the
   robot's TF (base_frame to the camera) come from the robot's own launch
-  files; examples/ shows two setups.
+  files; examples/wall_course and examples/ceiling show two setups.
 
     ros2 launch marker_survey survey.launch.xml output_dir:=$PWD/site \
         dictionary:=DICT_5X5_1000 marker_size:=0.38 frame_mode:=origin_marker origin_marker:=10
 
-  For a recorded bag: use_sim_time:=true, then ros2 bag play BAG clock.
+  For a recorded bag: use_sim_time:=true process_all:=true, then ros2 bag play BAG clock.
   Save with Ctrl-C or: ros2 service call /marker_survey/save std_srvs/srv/Trigger
 -->
 <launch>
@@ -27,6 +27,7 @@
   <arg name="compressed" default="false"/>
   <arg name="floor_offset" default="0.0" description="[m] how far the floor lies below base_frame (a vehicle on a stand)"/>
   <arg name="pose_sd" default="0.05" description="pose_frame: [m] noise of the pose source per axis"/>
+  <arg name="process_all" default="false" description="every frame in order, over a reliable subscription (recordings)"/>
   <arg name="use_sim_time" default="false"/>
 
   <node pkg="marker_survey" exec="marker_survey" name="marker_survey" output="screen">
@@ -46,6 +47,7 @@
     <param name="compressed" value="$(var compressed)"/>
     <param name="floor_offset" value="$(var floor_offset)"/>
     <param name="pose_sd" value="$(var pose_sd)"/>
+    <param name="process_all" value="$(var process_all)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
 </launch>

@@ -28,13 +28,15 @@ from marker_localizer.core.localize import Localizer, LocalizerSettings, planar_
 from marker_localizer.core import source_methods as src
 from marker_localizer.tools.evaluate import BANDS, band_name, evaluate, summarize
 
-SITES = os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'sites')
+EXAMPLES = os.path.join(os.path.dirname(__file__), '..', '..', 'examples')
+SITES = {name: os.path.join(EXAMPLES, example, 'sites', name) for example, name in (
+    ('wall_course', 'test_course'), ('ceiling', 'office'), ('ceiling', 'office_uneven'))}
 PIXEL_SD = 0.5
 
 
 def site(name):
-    return (mm.load(os.path.join(SITES, name, 'marker_map.yaml')),
-            load_path_csv(os.path.join(SITES, name, 'route.csv')))
+    return (mm.load(os.path.join(SITES[name], 'marker_map.yaml')),
+            load_path_csv(os.path.join(SITES[name], 'route.csv')))
 
 
 def frames_of(route, laps=2, step=0.1, sweeps=0):

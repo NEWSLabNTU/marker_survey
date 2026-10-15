@@ -20,8 +20,11 @@ only its launch file and the remapping into its own state estimator.
 
 Status: phases 0 to 3 of [ROADMAP.md](ROADMAP.md) are done: the survey for
 wall boards and ceiling markers, in three frame modes, the marker map file,
-the localizer in both modes, the tools and CI. Timing on a Jetson-class
-board is open; adoption by a robot and the web interface come next.
+the localizer in both modes, the tools and CI. Phase 4 has the integration
+guide, [docs/integration.md](docs/integration.md), and two examples that run
+in CI; printing and identifying markers from a browser are in. Timing on a
+Jetson-class board is open; the rest of the web interface comes next.
+Changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Packages
 
@@ -53,8 +56,8 @@ node, and compare the result with the truth:
 
 ```bash
 ros2 run marker_survey marker_survey_synthetic /tmp/demo \
-    --map examples/sites/test_course/marker_map.yaml \
-    --route examples/sites/test_course/route.csv --camera forward --origin 10 --sweeps 4
+    --map examples/wall_course/sites/test_course/marker_map.yaml \
+    --route examples/wall_course/sites/test_course/route.csv --camera forward --origin 10 --sweeps 4
 
 ros2 launch marker_survey survey.launch.xml output_dir:=/tmp/demo/result \
     dictionary:=DICT_5X5_1000 marker_size:=0.38 origin_marker:=10 use_sim_time:=true &
@@ -68,13 +71,17 @@ ros2 run marker_survey marker_survey_compare /tmp/demo/result/marker_map.yaml /t
 `ci/synthetic_survey.sh ceiling_align` (or `ceiling_pose_frame`,
 `ceiling_uneven`) the same for nine ceiling markers seen by an upward
 webcam, with a noisy localizer pose as the reference.
+[docs/integration.md](docs/integration.md) runs the two examples, a wall
+course and a ceiling, through their own launch files the same way.
 
 ## Surveying a site
 
 1. Print the markers; measure the edge of the black square (`marker_size`),
    not the sheet. A wrong size scales every distance.
 2. Start the robot's camera driver, its pose source and its TF, then the
-   survey (`examples/launch/` has a wall-board and a ceiling setup):
+   survey (`examples/wall_course/` and `examples/ceiling/` have a wall-board
+   and a ceiling setup; [docs/integration.md](docs/integration.md) lists
+   what the robot provides):
 
    ```bash
    ros2 launch marker_survey survey.launch.xml output_dir:=$PWD/my_site \
@@ -215,8 +222,9 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/my_site/marke
   corners on the full one (a 1920 x 1200 camera); the node logs its
   detection and fit times every 10 s.
 
-`examples/launch/` has a ceiling robot (planar, an `Odometry` prior) and a
-wall-board vehicle (3d). Without a robot,
+`examples/ceiling/` has a ceiling robot (planar, an `Odometry` prior) and
+`examples/wall_course/` a wall-board vehicle (3d); wiring the fixes into
+robot_localization is in [docs/integration.md](docs/integration.md). Without a robot,
 `ci/synthetic_localize.sh ceiling` (or `wall`, `ceiling_gate`) renders a
 recording, plays it through the node and scores the fixes against the truth;
 `marker_localizer_evaluate` runs both modes and the source implementations'
@@ -344,6 +352,7 @@ board is not measured yet. Not yet measured on a real site
 colcon test && colcon test-result --verbose
 ci/synthetic_survey.sh wall          # in a sourced workspace
 ci/synthetic_localize.sh ceiling     # the localizer through its node
+ci/example.sh ceiling                # an example's launch files, survey then localizer
 ci/localizer_comparison.sh wall      # against the source methods, no ROS
 ci/timing.sh                         # detection and fit per frame, one core
 python3 ci/check_words.py --commits  # neutral wording
@@ -351,7 +360,8 @@ python3 ci/check_words.py --commits  # neutral wording
 
 CI (GitHub Actions) builds and tests on `ros:humble` and `ros:jazzy`, runs
 the four rendered surveys and the three rendered localizer recordings
-through their nodes, compares the localizer with the source methods, times
+through their nodes, the two examples through their launch files (installed
+with rosdep), compares the localizer with the source methods, times
 it on an x86 and an arm64 runner, and checks the wording.
 
 ## Licence

@@ -9,8 +9,8 @@ fit, and by the distance to the markers. The prior pose (the state
 estimator's, for the gate and the single-marker ambiguity) is the truth with
 noise (--prior-sd, --prior-sd-deg).
 
-    marker_localizer_evaluate --map examples/sites/office/marker_map.yaml \\
-        --route examples/sites/office/route.csv --camera upward --laps 2 --rate 5 --speed 0.5 \\
+    marker_localizer_evaluate --map examples/ceiling/sites/office/marker_map.yaml \\
+        --route examples/ceiling/sites/office/route.csv --camera upward --laps 2 --rate 5 --speed 0.5 \\
         --methods planar,3d,ceiling_source
 
 --localize-map localizes against another map than the one rendered (a moved

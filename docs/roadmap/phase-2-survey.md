@@ -112,7 +112,8 @@ repeatable the node gained `process_all` (every frame in order, over a
 reliable subscription, for recordings) and the script delays playback until
 discovery is done.
 
-The scenes, all in `examples/sites/`:
+The scenes, all in `examples/sites/` (since phase 4 in
+`examples/wall_course/sites/` and `examples/ceiling/sites/`):
 
 - wall: the test course, 11 boards of 0.38 m with centres 0.25 m above the
   floor around a 10 x 4 m oval; forward camera 0.25 m up, 102 degrees; the

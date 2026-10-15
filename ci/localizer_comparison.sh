@@ -15,16 +15,16 @@ scene=${1:?scene}
 out=${2:-tmp/ci}
 mkdir -p "$out"
 export PYTHONPATH=$PWD/marker_survey:$PWD/marker_localizer${PYTHONPATH:+:$PYTHONPATH}
-sites=examples/sites
+wall=examples/wall_course/sites; ceil=examples/ceiling/sites
 json=$out/comparison_$scene.json
 case $scene in
   ceiling)
-    python3 -m marker_localizer.tools.evaluate --map $sites/office/marker_map.yaml \
-      --route $sites/office/route.csv --camera upward --laps 2 --rate 5 --speed 0.5 \
+    python3 -m marker_localizer.tools.evaluate --map $ceil/office/marker_map.yaml \
+      --route $ceil/office/route.csv --camera upward --laps 2 --rate 5 --speed 0.5 \
       --methods planar,3d,ceiling_source --blur-px 0.8 --noise-grey 3 --json "$json" ;;
   wall)
-    python3 -m marker_localizer.tools.evaluate --map $sites/test_course/marker_map.yaml \
-      --route $sites/test_course/route.csv --camera forward --laps 1 --rate 3 --sweeps 4 \
+    python3 -m marker_localizer.tools.evaluate --map $wall/test_course/marker_map.yaml \
+      --route $wall/test_course/route.csv --camera forward --laps 1 --rate 3 --sweeps 4 \
       --methods 3d,planar,wall_source --blur-px 0.8 --noise-grey 3 --json "$json" ;;
   *) echo "unknown scene $scene"; exit 2 ;;
 esac

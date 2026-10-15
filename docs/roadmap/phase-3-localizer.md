@@ -237,7 +237,8 @@ Two detector changes made this possible (shared with the survey,
 - `marker_localizer/launch/localizer.launch.xml`;
   `examples/launch/ceiling_markers_localizer.launch.xml` (planar, an
   Odometry prior) and `wall_boards_localizer.launch.xml` (3d,
-  `detect_scale` 0.5).
+  `detect_scale` 0.5); since phase 4 `examples/ceiling/launch/localizer.launch.xml`
+  and `examples/wall_course/launch/localizer.launch.xml`.
 - CI: `synthetic-localize` (ceiling, ceiling_gate, wall through the node),
   `localizer-comparison` (ceiling, wall), both on Humble and Jazzy, and
   `timing` on `ubuntu-24.04` and `ubuntu-24.04-arm`.

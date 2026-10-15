@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+  Wall boards: localizer. A vehicle localizing on wall boards with a wide
+  forward camera, 3d mode (6-DoF), gated against its state estimator's pose
+  (PoseWithCovarianceStamped). The vehicle's own launch runs the camera
+  driver, its TF (base_link to the camera) and the estimator, which fuses
+  /marker_localizer/pose. Then:
+
+    ros2 launch examples/wall_course/launch/localizer.launch.xml marker_map:=$PWD/sites/my_course/marker_map.yaml
+
+  detect_scale 0.5 finds the boards in a half-size image and refines their
+  corners on the full one: a 1920 x 1200 colour image then takes about a
+  fifth of the time to detect. For a smaller camera, 1.0.
+
+  The simulated recording of docs/integration.md plays into this file with
+  image_topic:=/camera/image prior_topic:=/prior_pose detect_scale:=1.0
+  use_sim_time:=true process_all:=true.
+-->
+<launch>
+  <arg name="marker_map" description="the site's marker_map.yaml"/>
+  <arg name="image_topic" default="/camera/image_rect"/>
+  <arg name="camera_info_topic" default="/camera/camera_info"/>
+  <arg name="prior_topic" default="/localization/pose_with_covariance" description="the estimator's pose, for the gate; empty: no gate"/>
+  <arg name="detect_scale" default="0.5"/>
+  <arg name="base_frame" default="base_link"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="process_all" default="false" description="true for a recording: every frame, in order"/>
+
+  <include file="$(find-pkg-share marker_localizer)/launch/localizer.launch.xml">
+    <arg name="marker_map" value="$(var marker_map)"/>
+    <arg name="mode" value="3d"/>
+    <arg name="base_frame" value="$(var base_frame)"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="prior_topic" value="$(var prior_topic)"/>
+    <arg name="prior_type" value="pose"/>
+    <arg name="detect_scale" value="$(var detect_scale)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="process_all" value="$(var process_all)"/>
+  </include>
+</launch>

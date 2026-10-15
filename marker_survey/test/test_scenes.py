@@ -26,12 +26,14 @@ from marker_survey.core.solve import finish
 from marker_survey.tools.compare import compare, summary
 from marker_survey.tools.synthetic import truth_map
 
-SITES = os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'sites')
+EXAMPLES = os.path.join(os.path.dirname(__file__), '..', '..', 'examples')
+SITES = {name: os.path.join(EXAMPLES, example, 'sites', name) for example, name in (
+    ('wall_course', 'test_course'), ('ceiling', 'office'), ('ceiling', 'office_uneven'))}
 
 
 def site(name):
-    return (mm.load(os.path.join(SITES, name, 'marker_map.yaml')),
-            load_path_csv(os.path.join(SITES, name, 'route.csv')))
+    return (mm.load(os.path.join(SITES[name], 'marker_map.yaml')),
+            load_path_csv(os.path.join(SITES[name], 'route.csv')))
 
 
 def survey(m, route, camera, mode, laps, step, sweeps=0, map_sd=0.0, seed=1, origin=None):

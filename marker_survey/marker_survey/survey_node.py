@@ -95,6 +95,7 @@ class MarkerSurveyNode(Node):
         self.T_child_cam = None
         self.undistort = None
         self.frames = 0
+        self.no_pose = 0
         self.saved = False
 
         self.tf_buffer = tf2_ros.Buffer()
@@ -108,10 +109,13 @@ class MarkerSurveyNode(Node):
         self.create_subscription(img_type, topic, self.on_image, qos)
         self.create_subscription(CameraInfo, gp('camera_info_topic'), self.on_info, qos)
         if p.pose_source == 'odometry':
-            # many drivers publish odometry BEST_EFFORT; a RELIABLE subscription never matches it
+            # many drivers publish odometry BEST_EFFORT; a RELIABLE subscription never matches it.
+            # A recording (process_all) keeps a deep queue: a lost message leaves a gap that
+            # drops the frames in it
             self.create_subscription(
                 Odometry, self.odom_topic, self.on_odom,
-                QoSProfile(depth=50, reliability=ReliabilityPolicy.BEST_EFFORT))
+                QoSProfile(depth=1000 if self.process_all else 50,
+                           reliability=ReliabilityPolicy.BEST_EFFORT))
         self.pub = self.create_publisher(MarkerArray, '~/markers', 1)
         self.pub_dbg = self.create_publisher(Image, '~/debug/image', 1)
         self.debug_width = int(gp('debug_width'))
@@ -195,6 +199,7 @@ class MarkerSurveyNode(Node):
                 newest = stamp_sec(self.queue[-1].header.stamp)
                 if newest - stamp_sec(msg.header.stamp) < 2.0:
                     return
+                self.no_pose += 1
             if self.queue and self.queue[0] is msg:
                 self.queue.popleft()
             if not self.process_all:
@@ -259,7 +264,8 @@ class MarkerSurveyNode(Node):
         views = ', '.join(f'{k}:{v.views}' for k, v in sorted(self.survey.markers.items()))
         origin = '' if self.origin is None or self.origin in self.survey.markers else \
             f'; origin marker {self.origin} NOT SEEN YET'
-        self.get_logger().info(f'{self.frames} frames, {len(self.survey.keyframes)} keyframes; '
+        dropped = f' ({self.no_pose} dropped: no camera pose)' if self.no_pose else ''
+        self.get_logger().info(f'{self.frames} frames{dropped}, {len(self.survey.keyframes)} keyframes; '
                                f'markers (views) {views or "none"}{origin}')
         self.publish_markers()
 

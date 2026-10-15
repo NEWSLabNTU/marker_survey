@@ -26,6 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         distro: [humble, jazzy]
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     container: ros:${{ matrix.distro }}
     defaults:
@@ -52,6 +53,7 @@ jobs:
       matrix:
         distro: [humble, jazzy]
         scene: [wall, ceiling_pose_frame, ceiling_align, ceiling_uneven]
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     container: ros:${{ matrix.distro }}
     defaults:
@@ -85,6 +87,7 @@ jobs:
       matrix:
         distro: [humble, jazzy]
         scene: [ceiling, ceiling_gate, wall]
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     container: ros:${{ matrix.distro }}
     defaults:
@@ -118,6 +121,7 @@ jobs:
       matrix:
         distro: [humble, jazzy]
         scene: [ceiling, wall]
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     container: ros:${{ matrix.distro }}
     defaults:
@@ -130,11 +134,49 @@ jobs:
       - name: Against the source implementations' methods, rendered frames
         run: ci/localizer_comparison.sh ${{ matrix.scene }} ci_out
 
+  example:
+    needs: build-and-test
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+        example: [wall_course, ceiling]
+    runs-on: ubuntu-24.04
+    container: ros:${{ matrix.distro }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies with rosdep, as docs/integration.md does
+        run: |
+          apt-get update
+          rosdep update --rosdistro ${{ matrix.distro }}
+          rosdep install --from-paths . --ignore-src -y --rosdistro ${{ matrix.distro }}
+      - name: Build
+        run: |
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          colcon build --event-handlers console_cohesion+
+      - name: The example's launch files on its simulated recording
+        run: |
+          source install/setup.bash
+          ci/example.sh ${{ matrix.example }} ci_out
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: example-${{ matrix.example }}-${{ matrix.distro }}
+          path: |
+            ci_out/*/survey/
+            ci_out/*/sim/truth_*.yaml
+            ci_out/*/*.log
+
   timing:
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    timeout-minutes: 30
     runs-on: ${{ matrix.runner }}
     container: ros:jazzy
     defaults:

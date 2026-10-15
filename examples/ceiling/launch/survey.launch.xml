@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<!--
+  Ceiling markers: survey. An indoor robot's upward camera, surveyed into the
+  frame of the robot's LiDAR map, so that places, zones and docks drawn on
+  that map agree with the markers. The robot's own launch runs the camera
+  driver, the wheel odometry (TF odom -> base_link) and the LiDAR localizer
+  (TF map -> odom). Then:
+
+    ros2 launch examples/ceiling/launch/survey.launch.xml output_dir:=$PWD/sites/my_site
+
+  frame_mode align_to_track (the default here) surveys in odom and fits the
+  whole trajectory to the localizer's (TF map -> base_link) once;
+  frame_mode:=pose_frame pose_frame:=map uses the localizer's map pose for
+  every keyframe instead.
+
+  The simulated recording of docs/integration.md plays into this file with
+  image_topic:=/camera/image camera_info_topic:=/camera/camera_info
+  use_sim_time:=true process_all:=true.
+-->
+<launch>
+  <arg name="output_dir" description="where marker_map.yaml, survey_report.yaml and survey_data.npz are written"/>
+  <arg name="frame_mode" default="align_to_track" description="align_to_track or pose_frame"/>
+  <arg name="dictionary" default="tag36h11"/>
+  <arg name="marker_size" default="0.45" description="[m] edge of the black square, measured"/>
+  <arg name="image_topic" default="/ceiling_camera/image_raw"/>
+  <arg name="camera_info_topic" default="/ceiling_camera/camera_info"/>
+  <arg name="pose_frame" default="odom" description="the frame of the camera poses; pose_frame mode: map"/>
+  <arg name="reference_frame" default="map" description="align_to_track: the LiDAR map's frame"/>
+  <arg name="base_frame" default="base_link"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="process_all" default="false" description="true for a recording: every frame, in order"/>
+
+  <include file="$(find-pkg-share marker_survey)/launch/survey.launch.xml">
+    <arg name="output_dir" value="$(var output_dir)"/>
+    <arg name="dictionary" value="$(var dictionary)"/>
+    <arg name="marker_size" value="$(var marker_size)"/>
+    <arg name="frame_mode" value="$(var frame_mode)"/>
+    <arg name="reference_frame" value="$(var reference_frame)"/>
+    <arg name="pose_source" value="tf"/>
+    <arg name="pose_frame" value="$(var pose_frame)"/>
+    <arg name="base_frame" value="$(var base_frame)"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="process_all" value="$(var process_all)"/>
+  </include>
+</launch>
