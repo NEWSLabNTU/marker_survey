@@ -4,6 +4,14 @@ Versions follow semantic versioning. Every change of a parameter, a launch
 argument, a topic or a file format gets an entry. The marker map file has
 its own `version` (now 1); the loader keeps reading older versions.
 
+## Unreleased
+
+### Tools
+
+- `marker_map_import --source-name NAME`: the name the map's header gives
+  the source (default: the source file's name, without its directory),
+  for a conversion from a temporary copy.
+
 ## 0.2.0 (2026-10-15)
 
 The web interface on the robot: survey, check and use the map from a

@@ -5,7 +5,9 @@
 
 A one-off migration; core/importers.py describes the two source formats.
 Comments next to markers are copied; the source's header and footer
-comments only with --keep-header (otherwise one line names the source).
+comments only with --keep-header (otherwise one line names the source:
+the file's basename, or --source-name when the given file is a temporary
+copy).
 The converted map is loaded back and compared with the source, pose by pose.
 """
 import argparse
@@ -26,15 +28,19 @@ def main(argv=None):
     ap.add_argument('--frame-id', default='map')
     ap.add_argument('--keep-header', action='store_true',
                     help="also copy the source's header and footer comments")
+    ap.add_argument('--source-name', metavar='NAME',
+                    help="the source's name in the map's header (default: the basename "
+                         'of SOURCE)')
     args = ap.parse_args(argv)
     with open(args.source) as f:
         text = f.read()
     try:
         if args.kind == 'course':
             m = importers.from_course(text, args.source, args.dictionary, args.frame_id,
-                                      args.keep_header)
+                                      args.keep_header, args.source_name)
         else:
-            m = importers.from_ceiling_list(text, args.source, args.frame_id, args.keep_header)
+            m = importers.from_ceiling_list(text, args.source, args.frame_id, args.keep_header,
+                                            args.source_name)
     except (mm.MarkerMapError, ValueError) as e:
         print(f'ERROR: {e}')
         return 1

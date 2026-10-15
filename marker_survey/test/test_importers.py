@@ -112,3 +112,18 @@ def test_the_import_tool(tmp_path, capsys):
     assert map_import.main(['ceiling-list', os.path.join(FIX, 'office_source.yaml'), str(out),
                             '--keep-header']) == 0
     assert 'Fixture for the importer' in out.read_text()
+
+
+def test_the_import_tool_names_the_source_by_basename_or_source_name(tmp_path):
+    copy = tmp_path / 'tmp_x7f3' / 'copy.yaml'
+    copy.parent.mkdir()
+    copy.write_text(open(os.path.join(FIX, 'office_source.yaml')).read())
+    out = tmp_path / 'office.yaml'
+    assert map_import.main(['ceiling-list', str(copy), str(out)]) == 0
+    first = out.read_text().splitlines()[0]
+    assert first == '# Imported from copy.yaml by marker_map_import.'
+    assert map_import.main(['ceiling-list', str(copy), str(out),
+                            '--source-name', 'site A ceiling list (2024)']) == 0
+    first = out.read_text().splitlines()[0]
+    assert first == '# Imported from site A ceiling list (2024) by marker_map_import.'
+    assert 'tmp_x7f3' not in out.read_text() and 'copy.yaml' not in out.read_text()

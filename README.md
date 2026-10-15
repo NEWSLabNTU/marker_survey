@@ -193,7 +193,8 @@ boards with yaw, pitch, roll in radians; a plain list of ceiling markers
 with x, y, z, yaw) convert once with
 `ros2 run marker_survey marker_map_import course ...` or `... ceiling-list ...`;
 comments next to markers are copied, the source's header comments only
-with `--keep-header`.
+with `--keep-header`; otherwise one header line names the source by its
+file name, or by `--source-name NAME` when converting a temporary copy.
 
 ## Localizing on the markers
 
