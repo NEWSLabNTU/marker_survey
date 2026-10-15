@@ -10,17 +10,61 @@
 <header>
   <h1>Markers</h1>
   <nav>
-    <button class="tab active" data-tab="print">Print markers</button>
+    <button class="tab active" data-tab="plan">Plan</button>
+    <button class="tab" data-tab="print">Print markers</button>
     <button class="tab" data-tab="identify">Identify a marker</button>
     <button class="tab robot" data-tab="survey" hidden>Survey</button>
     <button class="tab robot" data-tab="check" hidden>Check</button>
+    <button class="tab robot" data-tab="localize" hidden>Test localization</button>
     <button class="tab robot" data-tab="use" hidden>Use the map</button>
   </nav>
   <span id="link" class="link-state" hidden></span>
 </header>
 
 <main>
-<section id="print" class="panel active">
+<section id="plan" class="panel active">
+  <form id="pl_form" class="card" autocomplete="off">
+    <h2>Plan the markers</h2>
+    <p class="note">Measure the ceiling with a laser distance meter. The numbers come from the
+      same planner as the marker_plan command.</p>
+    <div class="field">
+      <span class="label">The camera is carried by</span>
+      <label class="choice"><input type="radio" name="pl_preset" value="robot" checked> a robot
+        (camera near the floor)</label>
+      <label class="choice"><input type="radio" name="pl_preset" value="handheld"> a person
+        (a laptop and a webcam held about 1 m above the floor)</label>
+    </div>
+    <div class="grid2">
+      <label>Ceiling height (m) <input id="pl_ceiling" type="number" step="0.01" min="0" value="2.9"></label>
+      <label>Camera height (m) <input id="pl_camera" type="number" step="0.01" min="0" value="0.26"></label>
+      <label>Field of view, horizontal (deg) <input id="pl_hfov" type="number" step="0.1" min="1" value="70"></label>
+      <label>Image width x height (px)
+        <span class="row"><input id="pl_w" type="number" min="16" value="640"><input id="pl_h" type="number" min="16" value="480"></span></label>
+      <label>Speed (m/s) <input id="pl_speed" type="number" step="0.05" min="0" value="0.5"></label>
+      <label>Exposure (ms) <input id="pl_exposure" type="number" step="1" min="0" value="20"></label>
+      <label>Route length (m) <input id="pl_length" type="number" step="0.5" min="0" placeholder="optional"></label>
+      <label>Marker size (cm) <input id="pl_size" type="number" step="1" min="1" placeholder="recommended"></label>
+    </div>
+    <div class="row">
+      <button type="button" id="pl_from_camera" hidden>Read the field of view from the camera</button>
+      <small id="pl_camera_note"></small>
+    </div>
+  </form>
+  <aside class="card" id="pl_result">
+    <p id="pl_error" class="bad" hidden></p>
+    <div id="pl_numbers"></div>
+    <div id="pl_figure" class="sideview"></div>
+    <div class="actions">
+      <a id="pl_print" class="button primary" href="#print">Print these markers</a>
+      <label class="choice small">first ID <input id="pl_first_id" type="number" min="0" step="1" value="0"></label>
+    </div>
+    <p class="note">Spacing "with no odometry": a marker is always in view, so a survey with the
+      camera alone, or a localizer with nothing else, never loses track along the route. Put one
+      more marker within the zone of every stop.</p>
+  </aside>
+</section>
+
+<section id="print" class="panel">
   <form id="job" autocomplete="off">
     <div class="field">
       <label for="size">Marker size</label>
@@ -136,6 +180,7 @@
   </div>
 
   <div id="sv_run" hidden>
+    <p id="sv_lost" class="banner lost" role="alert" hidden></p>
     <div class="statusbar card">
       <span id="sv_state" class="state"></span>
       <span id="sv_counts"></span>
@@ -156,7 +201,7 @@
         <div class="cardhead"><h3>Map from above</h3></div>
         <canvas id="sv_map" class="map" width="600" height="420"></canvas>
         <p class="legend"><span class="dot good"></span> good <span class="dot again"></span> pass again
-          <span class="dot bad"></span> bad <span class="line"></span> the robot's path</p>
+          <span class="dot bad"></span> bad <span class="line"></span> <span id="sv_path_label">the robot's path</span></p>
       </div>
     </div>
     <div class="two">
@@ -252,6 +297,71 @@
   </div>
 </section>
 
+<section id="localize" class="panel robot-panel">
+  <p id="lz_offline" class="notice" hidden>The localizer does not answer. Start it with the
+    handheld or the robot's launch file; this page reconnects by itself.</p>
+  <div class="card">
+    <h2>Test the localization</h2>
+    <p>Walk (or drive) along the routes. Each image with markers in view gives a pose from the
+      markers alone. With no marker in view the pose stays where it was; when one comes back
+      into view it jumps to where the camera now is (a kidnap, dashed on the map).</p>
+    <div class="row">
+      <span class="label">Map</span>
+      <label class="choice"><input type="radio" name="lz_which" value="survey"> the survey just
+        made (a trial, nothing is written)</label>
+      <label class="choice"><input type="radio" name="lz_which" value="site"> the map in use</label>
+    </div>
+    <p id="lz_reads" class="note"></p>
+  </div>
+  <p id="lz_nofix" class="banner lost" role="alert" hidden></p>
+  <div class="statusbar card">
+    <div class="figure"><span id="lz_x" class="bignum">-</span><small>x</small></div>
+    <div class="figure"><span id="lz_y" class="bignum">-</span><small>y</small></div>
+    <div class="figure" id="lz_z_box"><span id="lz_z" class="bignum">-</span><small>z</small></div>
+    <div class="figure"><span id="lz_yaw" class="bignum">-</span><small>yaw</small></div>
+    <div class="figure"><span id="lz_age" class="bignum">-</span><small>since the last fix</small></div>
+    <div class="figure"><span id="lz_kidnaps" class="bignum">0</span><small>kidnaps</small></div>
+    <span class="spacer"></span>
+    <button id="lz_reset">Clear the path</button>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="cardhead"><h3>Camera</h3>
+        <label class="choice small"><input type="checkbox" id="lz_cam_on" checked> show</label></div>
+      <div class="camera"><img id="lz_cam" alt="what the localizer sees"></div>
+      <p class="legend"><span class="sw known"></span> used <span class="sw orange"></span> left out
+        <span class="sw small"></span> unusable <span class="sw grey"></span> not in the map</p>
+    </div>
+    <div class="card">
+      <div class="cardhead"><h3>Map from above</h3></div>
+      <canvas id="lz_map" class="map" width="600" height="420"></canvas>
+      <p class="legend"><span class="sq"></span> marker <span class="line"></span> path
+        <span class="line dashed"></span> kidnap (pose froze, then jumped) <span class="dot pose"></span> now
+        <span class="cross"></span> test point</p>
+      <ul id="lz_events" class="plain"></ul>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Test points</h3>
+    <p class="note">Stand on a spot, measure its x and y with a tape from the floor point below
+      the origin marker (x the way its top edge points), and record it: the localizer's pose is
+      stored beside it.</p>
+    <div class="row">
+      <label>x (m) <input id="lz_px" type="number" step="0.01"></label>
+      <label>y (m) <input id="lz_py" type="number" step="0.01"></label>
+      <button id="lz_record" class="primary">Record a test point</button>
+      <span id="lz_point_msg" class="note"></span>
+    </div>
+    <table class="list"><thead><tr><th>#</th><th>Measured x, y</th><th>Localizer x, y</th>
+      <th>Error</th><th>Pose age</th><th>Markers</th><th></th></tr></thead><tbody id="lz_points"></tbody></table>
+    <p id="lz_errors" class="note"></p>
+    <div class="actions">
+      <a id="lz_csv" class="button" href="/api/localize.csv" download="localization_test.csv">Download CSV</a>
+      <button id="lz_clear">Clear the test points</button>
+    </div>
+  </div>
+</section>
+
 <section id="use" class="panel robot-panel">
   <div class="two">
     <div class="card">
@@ -288,6 +398,7 @@
 </main>
 
 <script src="app.js"></script>
+<script src="plan.js"></script>
 <script src="robot.js"></script>
 </body>
 </html>

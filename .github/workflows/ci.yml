@@ -224,6 +224,11 @@ jobs:
         run: |
           source install/setup.bash
           ci/web_browser.sh ci_out
+      - name: The handheld case from the browser (plan, a camera-only survey, the localization test)
+        if: success() || failure()
+        run: |
+          source install/setup.bash
+          ci/web_handheld.sh ci_out
       - uses: actions/upload-artifact@v5
         if: always()
         with:
@@ -232,3 +237,6 @@ jobs:
             ci_out/web/shots/
             ci_out/web/*.log
             ci_out/web/site/
+            ci_out/handheld/shots/
+            ci_out/handheld/*.log
+            ci_out/handheld/*.csv

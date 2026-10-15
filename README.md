@@ -273,9 +273,31 @@ the markers marked "pass again" (the earlier solve is kept). **Check**: drive
 the routes and see each marker fix against the robot's own position, with a
 table of how often each marker agreed; a marker that moved is flagged.
 **Use the map**: write the survey's map where the localizer reads it, after
-a confirmation, keeping the previous version, and undo. No build step, no
-internet, no login (a trusted network, or the robot's own access control);
-details in [docs/integration.md](docs/integration.md#the-web-interface).
+a confirmation, keeping the previous version, and undo. **Plan**: marker
+size, spacing and count from the ceiling and the camera, with a side view.
+**Test localization**: the pose from the markers alone, the time since the
+last fix, the trajectory with kidnaps (the pose froze with no marker in
+view, then jumped) dashed, and test points measured with a tape, with their
+errors as CSV. No build step, no internet, no login (a trusted network, or
+the robot's own access control); details in
+[docs/integration.md](docs/integration.md#the-web-interface).
+
+### No robot: a laptop and a webcam
+
+```bash
+ros2 launch marker_survey_web handheld.launch.xml site:=$PWD/sites/my_site \
+    camera_params:=$PWD/my_webcam.yaml        # usb_cam's parameters, with the calibration
+```
+
+A person holds a laptop with a USB webcam pointing up at the ceiling markers
+and walks the routes a robot would drive; the page runs on the same laptop
+(`http://127.0.0.1:8090/`). Plan with the "a person" preset (camera 1.0 m
+above the floor, 0.5 m/s: under a 2.9 m ceiling a 70 deg webcam at 640 x 480
+reads 40 cm markers, one every 1.39 m along a route keeps one always in
+view), print, survey with the camera alone (start from a marker, which
+defines the map's frame; a banner says when no mapped marker is in view and
+which one to go back to), and test the localization (3d, no prior). No robot
+frames: the camera's optical frame is the base frame.
 
 ## Printing markers
 
@@ -289,7 +311,8 @@ ros2 run marker_survey_web marker_survey_web --host 0.0.0.0  # also from a phone
 Give the marker size (the edge of the black square) and how many markers;
 the page shows the paper, the IDs and a preview of every page, and
 downloads the PDF. "Don't know the size?" works it out from the ceiling
-height and the camera (`marker_plan`). The "Identify a marker" tab reads the
+height and the camera (`marker_plan`); the Plan tab does the same with the
+spacing, the count for a route and a side view. The "Identify a marker" tab reads the
 IDs from a phone photo of a sheet or a ceiling.
 
 The same from a terminal:

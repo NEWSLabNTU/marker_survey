@@ -1,4 +1,4 @@
-// The survey, check and map screens. Shown only when the page is served by
+// The survey, check, localization test and map screens. Shown only when the page is served by
 // marker_survey_web_node on the robot: the state arrives over the WebSocket
 // /api/live twice a second, camera frames as JPEG while a camera is shown,
 // and actions go to the JSON API (/api/survey, /api/check, /api/map).
@@ -18,6 +18,8 @@
   let report = null;
   let frameKey = '';
   let checkWhich = null;
+  let localizeWhich = null;
+  let pointsKey = '';
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -77,14 +79,16 @@
     let want = null;
     if (tab === 'survey' && !$('sv_run').hidden && $('sv_cam_on').checked) want = 'survey';
     if (tab === 'check' && $('ck_cam_on').checked) want = 'check';
+    if (tab === 'localize' && $('lz_cam_on').checked) want = 'check';     // the localizer's camera
     if (want === camera || !ws || ws.readyState !== 1) return;
     camera = want;
     ws.send(JSON.stringify({camera: want}));
-    if (!want) for (const id of ['sv_cam', 'ck_cam']) $(id).removeAttribute('src');
+    if (!want) for (const id of ['sv_cam', 'ck_cam', 'lz_cam']) $(id).removeAttribute('src');
   }
 
   function onCamera(blob) {
-    const img = camera === 'survey' ? $('sv_cam') : camera === 'check' ? $('ck_cam') : null;
+    const img = camera === 'survey' ? $('sv_cam')
+      : camera === 'check' ? (tab === 'localize' ? $('lz_cam') : $('ck_cam')) : null;
     if (!img) return;
     const url = URL.createObjectURL(blob);
     img.src = url;
@@ -97,6 +101,7 @@
     if (!st.robot) return;
     renderSurvey();
     renderCheck();
+    renderLocalize();
     wantCamera();
   }
 
@@ -106,7 +111,9 @@
   }
 
   // layers: {markers: [{x, y, size, light, id}], trail: [[x, y]], robot: {x, y, yaw_deg},
-  //          fixes: [{fix: [x, y], prior: [x, y], agrees}]}
+  //          fixes: [{fix: [x, y], prior: [x, y], agrees}],
+  //          track: [[x, y, flag]] (flag 1: a kidnap ends here, dashed; 2: a gap, dotted),
+  //          points: [{n, x_measured, y_measured, x, y}] (test points)}
   function drawMap(canvas, layers) {
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth || 600;
@@ -121,6 +128,8 @@
     for (const m of layers.markers || []) pts.push([m.x, m.y]);
     for (const p of layers.trail || []) pts.push(p);
     for (const f of layers.fixes || []) { pts.push(f.fix); if (f.prior) pts.push(f.prior); }
+    for (const p of layers.track || []) pts.push([p[0], p[1]]);
+    for (const p of layers.points || []) { pts.push([p.x_measured, p.y_measured]); pts.push([p.x, p.y]); }
     if (layers.robot) pts.push([layers.robot.x, layers.robot.y]);
     if (!pts.length) {
       g.fillStyle = css('--muted');
@@ -156,6 +165,42 @@
       trail.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
       g.stroke();
       g.globalAlpha = 1;
+    }
+    // a localizer's track: solid where fixes follow each other, dashed red across a kidnap
+    const track = layers.track || [];
+    for (let i = 1; i < track.length; i++) {
+      const [a, b] = [track[i - 1], track[i]];
+      const kind = b[2] || 0;
+      g.strokeStyle = kind === 1 ? css('--bad') : kind === 2 ? css('--muted') : css('--accent');
+      g.lineWidth = kind === 1 ? 2.5 : 2;
+      g.setLineDash(kind === 1 ? [8, 6] : kind === 2 ? [2, 4] : []);
+      g.beginPath();
+      g.moveTo(X(a[0]), Y(a[1]));
+      g.lineTo(X(b[0]), Y(b[1]));
+      g.stroke();
+      if (kind === 1) {
+        g.fillStyle = css('--bad');
+        g.beginPath();
+        g.arc(X(b[0]), Y(b[1]), 4, 0, 2 * Math.PI);
+        g.fill();
+      }
+    }
+    g.setLineDash([]);
+    // test points: the measured spot (a cross), a line to the localizer's pose there
+    g.font = '11px system-ui, sans-serif';
+    for (const p of layers.points || []) {
+      const [mx, my] = [X(p.x_measured), Y(p.y_measured)];
+      g.strokeStyle = css('--warn');
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(mx - 6, my); g.lineTo(mx + 6, my); g.moveTo(mx, my - 6); g.lineTo(mx, my + 6);
+      g.stroke();
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(mx, my); g.lineTo(X(p.x), Y(p.y));
+      g.stroke();
+      g.fillStyle = css('--warn');
+      g.fillText(String(p.n), mx + 7, my + 12);
     }
     // fixes and the robot's position at each
     for (const f of layers.fixes || []) {
@@ -264,15 +309,30 @@
     box.lastChild.id = 'sv_error';
   }
 
+  function lostText(sv) {
+    if (sv.tracking !== 'lost') return '';
+    const since = sv.lost_since === null || sv.lost_since === undefined ? ''
+      : ` (${Math.round(sv.lost_since)} s)`;
+    return sv.last_known_marker === null || sv.last_known_marker === undefined
+      ? `No mapped marker in view${since}: go back to where a mapped marker is in view.`
+      : `No mapped marker in view${since}: go back to marker ${sv.last_known_marker}.`;
+  }
+
   function renderRun(sv) {
     const rec = sv.state === 'recording';
+    const handheld = (sv.pose_source || (sv.frame || {}).pose_source) === 'markers';
+    const lost = lostText(sv);
+    show('sv_lost', !!lost);
+    $('sv_lost').textContent = lost;
+    $('sv_path_label').textContent = handheld ? 'the path walked' : 'the robot\'s path';
     $('sv_state').textContent = !sv.camera ? (rec ? 'Recording: waiting for the camera' : 'Waiting for the camera')
-      : rec ? 'Recording: drive slowly past every marker' : 'Paused';
+      : rec ? (handheld ? 'Recording: walk slowly, keep a mapped marker in view'
+        : 'Recording: drive slowly past every marker') : 'Paused';
     $('sv_state').className = `state ${rec ? 'rec' : ''}`;
     const L = sv.lights || {};
     $('sv_counts').textContent = `${sv.markers.length} markers (${L.good || 0} good, ` +
       `${L['pass again'] || 0} to pass again${L.bad ? `, ${L.bad} bad` : ''}), ${sv.keyframes} keyframes` +
-      (sv.dropped ? `; ${sv.dropped} frames without a robot position` : '');
+      (sv.dropped ? `; ${sv.dropped} frames without ${handheld ? 'a mapped marker in view' : 'a robot position'}` : '');
     $('sv_pause').textContent = rec ? 'Pause' : 'Continue recording';
     const inview = (sv.detections || []).map((d) => `${d.id} (${d.state === 'unusable'
       ? (d.why === 'border' ? 'cut off' : 'too small') : d.state})`);
@@ -444,6 +504,101 @@
     }
   }
 
+  // ------------------------------------------------------------------ localization test
+  function secs(v) {
+    if (v === null || v === undefined) return '-';
+    return v < 10 ? `${v.toFixed(1)} s` : `${Math.round(v)} s`;
+  }
+
+  function metres(v) { return v === null || v === undefined ? '-' : `${(+v).toFixed(2)} m`; }
+
+  function renderLocalize() {
+    const loc = S.localizer;
+    const lz = S.localize;
+    show('lz_offline', !(S.connected && S.connected.localizer));
+    const reads = S.map && S.map.localizer_reads;
+    if (reads && reads !== localizeWhich) {
+      localizeWhich = reads;
+      for (const r of document.querySelectorAll('input[name="lz_which"]')) r.checked = r.value === reads;
+    }
+    document.querySelector('input[name="lz_which"][value="survey"]').disabled = !(S.map && S.map.survey_map);
+    if (loc) {
+      $('lz_reads').textContent = `The localizer reads ${loc.map}` +
+        (loc.markers && loc.markers.length ? ` (${loc.markers.length} markers), mode ${loc.mode}.`
+          : ' (no map yet: survey first, or choose a map).');
+    }
+    if (!lz) return;
+    const p = lz.pose;
+    const threeD = (loc && loc.mode === '3d') || (p && p.z !== undefined);
+    $('lz_x').textContent = p ? metres(p.x) : '-';
+    $('lz_y').textContent = p ? metres(p.y) : '-';
+    show('lz_z_box', threeD);
+    $('lz_z').textContent = p && p.z !== undefined ? metres(p.z) : '-';
+    $('lz_yaw').textContent = p ? `${Math.round(p.yaw_deg) || 0} deg` : '-';
+    const age = lz.fix_age_s;
+    $('lz_age').textContent = secs(age);
+    const gap = (lz.settings && lz.settings.gap_s) || 1.0;
+    const stale = age !== null && age !== undefined && age > gap;
+    show('lz_nofix', stale);
+    $('lz_nofix').textContent = stale
+      ? `No marker in view for ${Math.round(age)} s: the pose shown is where the last marker was seen.` : '';
+    $('lz_kidnaps').textContent = String(lz.kidnaps.length);
+    const ev = $('lz_events');
+    ev.replaceChildren();
+    for (const k of lz.kidnaps.slice(-5)) {
+      ev.append(el('li', 'bad', `kidnap: no fix for ${k.gap_s} s, then the pose jumped ${k.jump_m.toFixed(2)} m ` +
+        `(to marker ${k.ids.join(', ')})`));
+    }
+    if (lz.kidnaps.length > 5) ev.append(el('li', 'note', `and ${lz.kidnaps.length - 5} earlier`));
+    renderPoints(lz);
+    if (tab === 'localize') {
+      drawMap($('lz_map'), {markers: (loc && loc.markers || []).map((m) => ({...m, light: null, size: 0.2})),
+                            track: lz.track, points: lz.points,
+                            robot: p ? {x: p.x, y: p.y, yaw_deg: p.yaw_deg} : null});
+    }
+  }
+
+  function renderPoints(lz) {
+    const key = JSON.stringify(lz.points);
+    if (key === pointsKey) return;
+    pointsKey = key;
+    const body = $('lz_points');
+    body.replaceChildren();
+    for (const p of lz.points) {
+      const tr = el('tr');
+      if (p.stale) tr.className = 'flagged';
+      const del = el('button', 'small', 'delete');
+      del.addEventListener('click', () => pointAction({action: 'delete', n: p.n}));
+      const td = el('td');
+      td.append(del);
+      tr.append(el('td', 'num', p.n), el('td', 'num', `${p.x_measured.toFixed(2)}, ${p.y_measured.toFixed(2)}`),
+                el('td', 'num', `${p.x.toFixed(2)}, ${p.y.toFixed(2)}`), el('td', 'num', cm(p.error_m)),
+                el('td', 'num', secs(p.fix_age_s) + (p.stale ? ' (stale)' : '')), el('td', 'note', p.markers), td);
+      body.append(tr);
+    }
+    const e = lz.errors;
+    $('lz_errors').textContent = e.count
+      ? `${e.count} test point${e.count > 1 ? 's' : ''}: error mean ${cm(e.mean_m)}, RMS ${cm(e.rms_m)}, ` +
+        `largest ${cm(e.max_m)}.` : 'No test point yet.';
+  }
+
+  async function pointAction(body) {
+    const res = await api('POST', '/api/localize', body);
+    $('lz_point_msg').textContent = res.ok
+      ? (res.point ? `Point ${res.point.n}: error ${cm(res.point.error_m)}` : '') : res.error;
+    $('lz_point_msg').className = res.ok ? 'note' : 'bad';
+    const st = await api('GET', '/api/state');
+    if (st.robot) onState(st);
+  }
+
+  async function chooseLocalizeMap(which) {
+    const res = await api('POST', '/api/localize', {action: 'map', which});
+    if (!res.ok) {
+      $('lz_reads').textContent = res.error;
+      localizeWhich = null;
+    }
+  }
+
   // ------------------------------------------------------------------ use
   async function loadMap() {
     const res = await api('GET', '/api/map');
@@ -537,6 +692,14 @@
       r.addEventListener('change', () => chooseCheckMap(r.value));
     }
     $('ck_reset').addEventListener('click', () => api('POST', '/api/check', {action: 'reset'}));
+    for (const r of document.querySelectorAll('input[name="lz_which"]')) {
+      r.addEventListener('change', () => chooseLocalizeMap(r.value));
+    }
+    $('lz_cam_on').addEventListener('change', wantCamera);
+    $('lz_reset').addEventListener('click', () => pointAction({action: 'reset', points: false}));
+    $('lz_clear').addEventListener('click', () => pointAction({action: 'clear_points'}));
+    $('lz_record').addEventListener('click', () => pointAction({action: 'point', x: $('lz_px').value,
+                                                                 y: $('lz_py').value}));
     $('us_write').addEventListener('click', () => show('us_confirm', true));
     $('us_no').addEventListener('click', () => show('us_confirm', false));
     $('us_yes').addEventListener('click', () => mapAction('use'));

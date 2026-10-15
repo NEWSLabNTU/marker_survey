@@ -95,6 +95,8 @@ previous version back.
 - [ ] Usability session
 - [ ] Place (step 2): the checklist per marker and photos of placed markers;
       plan (step 1): routes drawn on a site map
+- [x] No robot: plan, a camera-only survey and a localization test with a
+      handheld webcam (below)
 
 ## Printing and identifying, done ahead of the rest
 
@@ -200,3 +202,43 @@ drives is about 2 and playing them in real time about 6. The API tests
 - **No camera on the Use screen, no map editing.** Not asked for; a
   surveyed marker that is wrong is surveyed again.
 
+
+## No robot: a handheld webcam
+
+A person holds a laptop with a USB webcam pointing up at the ceiling
+markers and walks the routes a robot would drive; the page runs on the same
+laptop. `launch/handheld.launch.xml`: `usb_cam` (optional, `launch_camera`,
+a params file), the survey with `pose_source: markers` (the camera alone)
+and the localizer in 3d with no prior, both with the camera's optical frame
+as their base (no TF), and the web node.
+
+- **Plan** (`#plan`, also without ROS; `planner.py`, `POST /api/plan`):
+  presets "a robot" and "a person" (camera 1.0 m, 0.5 m/s), the field of
+  view typed or read from the live `camera_info` (the web node's
+  `camera_info_topic`: 2 atan(w / 2 fx)); every number from
+  `core/marker_plan.py`: readable size range, recommended size and sheet,
+  zone R, spacing D with no odometry (2R), on a grid and with odometry, the
+  count for a route length. A side view (SVG drawn in the page from these
+  numbers): floor, camera, field of view, the width seen on the ceiling,
+  the zone, markers of size S every D. "Print these markers" opens the
+  print tab with that size and the IDs (`#print?size=40&count=23&ids=0-22`).
+- **Survey**, camera alone: only "Start from a marker" is offered (the
+  marker defines the frame); a banner while `tracking` is `lost`: "No mapped
+  marker in view (N s): go back to marker M"; the path walked on the map.
+- **Test localization** (`#localize`; `loctest.py`, `GET|POST
+  /api/localize`, `GET /api/localize.csv`): the localizer's camera, the
+  pose (x, y, yaw, z in 3d), the time since the last fix (the localizer's
+  `last_fix_age`, else the time since the web node heard one) with a banner
+  past `localize.gap_s`, the map's markers and the trajectory; a kidnap (a
+  gap over `localize.gap_s` followed by a jump over `localize.jump_m`) is
+  drawn dashed and listed. Test points: the measured x, y typed in, the
+  latest pose stored beside it, the error; mean, RMS and largest; CSV.
+
+Tests: `test_handheld_api.py` (the plan against `marker_plan` for 2.9 m and
+the handheld preset, the camera-only survey losing track in a step aside,
+the kidnap, test points, the CSV; `handheld_fixture.py` plays a simulated
+walk under a row of eleven 0.40 m markers 1.2 m apart through the real
+localizer); `test_launch_names.py` starts `handheld.launch.xml` without the
+camera; `ci/web_handheld.sh` walks plan, survey and test in Chromium on the
+same simulated walk (the step `The handheld case from the browser` of the
+`web-browser` job).

@@ -19,6 +19,7 @@
   <arg name="survey_node" default="/marker_survey" description="the survey node (its node_name, with a namespace if any)"/>
   <arg name="localizer_node" default="/marker_localizer" description="the localizer node (its node_name, with a namespace if any)"/>
   <arg name="camera_rate" default="5.0" description="[Hz] camera frames sent to a page that shows them"/>
+  <arg name="camera_info_topic" default="" description="the camera's camera_info: the plan screen reads the field of view from it; empty: not read"/>
   <arg name="use_sim_time" default="false"/>
 
   <node pkg="marker_survey_web" exec="marker_survey_web_node" name="$(var node_name)" output="screen">
@@ -28,6 +29,7 @@
     <param name="survey_node" value="$(var survey_node)"/>
     <param name="localizer_node" value="$(var localizer_node)"/>
     <param name="camera_rate" value="$(var camera_rate)"/>
+    <param name="camera_info_topic" value="$(var camera_info_topic)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
 </launch>

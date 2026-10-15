@@ -4,6 +4,38 @@ Versions follow semantic versioning. Every change of a parameter, a launch
 argument, a topic or a file format gets an entry. The marker map file has
 its own `version` (now 1); the loader keeps reading older versions.
 
+## Unreleased
+
+### Web interface: no robot, a handheld webcam
+
+- Plan tab (`#plan`, also without ROS): ceiling and camera heights with
+  presets (a robot; a person holding the camera, 1.0 m, 0.5 m/s), field
+  of view (typed, or read from the live `camera_info`), image size, speed,
+  exposure and a route length give, from `core/marker_plan.py`, the
+  readable size range, the recommended size and sheet, the zone R, the
+  spacing for a marker always in view with no odometry and the marker
+  count; a side view drawn from the same numbers; a link to the print tab
+  with that size and the IDs. New `POST /api/plan`; `/api/info` lists the
+  presets; the print tab takes a job in the address
+  (`#print?size=40&count=23&ids=0-22`).
+- Survey screen with `pose_source: markers` (a camera-only survey): only
+  "Start from a marker" is offered, and a banner says when no mapped marker
+  is in view and which one to go back to.
+- Test localization tab (`#localize`): the localizer's camera, its pose
+  (x, y, yaw, z), the time since the last fix, the trajectory with
+  kidnaps (the pose froze, then jumped) dashed, and test points measured
+  with a tape with their errors. New `GET|POST /api/localize`,
+  `GET /api/localize.csv`; node parameters `localize.gap_s` (1.0) and
+  `localize.jump_m` (0.5).
+- Node parameter and launch argument `camera_info_topic` (empty: not read).
+- `launch/handheld.launch.xml`: `usb_cam` (optional: `launch_camera`, a
+  params file, `config/handheld_usb_cam.yaml`), the survey with the camera
+  alone, the localizer in 3d with no prior, the web node; the camera's
+  optical frame is the base frame, no TF.
+- Tests: `test_handheld_api.py` on a simulated handheld walk; the launch
+  file without the camera; `ci/web_handheld.sh`, the handheld case in
+  Chromium, in the `web-browser` job.
+
 ## 0.3.0 (2026-10-15)
 
 ### Survey uncertainty

@@ -11,6 +11,9 @@ actions through a `robot` object, which the ROS node provides
     robot.localizer_set_map(path) -> (ok, message)         read this map from now on
     robot.localizer_reload() -> (ok, message)              read the map file again
 
+The localization test screen (loctest.py) keeps the localizer's fixes as a
+trajectory with its kidnap events, and the test points measured with a tape.
+
 Without a robot (marker_survey_web on a laptop) the page offers printing and
 identifying only.
 """
@@ -27,7 +30,9 @@ from marker_localizer.core.check import CheckSettings, CheckStats
 from marker_survey.core import live
 from marker_survey.core.solve import MAP_FILE, REPORT_FILE
 
+from marker_survey_web.loctest import LocTest, LocTestSettings
 from marker_survey_web.mapstore import MapStore, MapStoreError
+from marker_survey_web.planner import hfov_from_camera_info
 
 SAVE_TIMEOUT = 900.0
 STALE = 3.0               # [s] a status older than this: the node is not answering
@@ -66,26 +71,36 @@ def frame_options(st: dict) -> list:
         robot_map = 'pose_frame'
         label = f"Use the robot's map ({f['pose_frame']})"
         text = 'The markers are placed in the frame of the robot\'s position.'
+    elif f.get('pose_source') == 'markers':
+        label = "Use the robot's map"
+        text = ''
+        why = 'the camera alone gives no map: start from a marker'
     else:
         label = "Use the robot's map"
         text = ''
         why = 'this robot gives the survey no map position; start from a marker instead'
+    marker_text = ('The floor below the marker you name is the origin; x points the way the '
+                   'marker faces (for a marker on the ceiling, the way its top edge points).')
+    if f.get('pose_source') == 'markers':
+        marker_text += (' Start under that marker, then walk on so that a mapped marker stays in '
+                        'view while each new one comes in.')
     return [{'use': 'robot_map', 'mode': robot_map, 'label': label, 'text': text,
              'available': robot_map is not None, 'why': why},
             {'use': 'marker', 'mode': 'origin_marker', 'label': 'Start from a marker',
-             'text': 'The floor below the marker you name is the origin; x points the way the '
-                     'marker faces (for a marker on the ceiling, the way its top edge points).',
-             'available': True, 'why': ''}]
+             'text': marker_text, 'available': True, 'why': ''}]
 
 
 class Hub:
-    def __init__(self, robot=None, map_path: str = '', check: CheckSettings = None):
+    def __init__(self, robot=None, map_path: str = '', check: CheckSettings = None,
+                 loctest: LocTestSettings = None):
         self.robot = robot
         self.map_path = map_path or ''
         self.lock = threading.Lock()
         self.survey, self.survey_t = None, 0.0
         self.localizer, self.localizer_t = None, 0.0
         self.check = CheckStats(check)
+        self.loctest = LocTest(loctest)
+        self.camera_info = None          # the live camera's size and field of view
         self.clients = set()
         self.busy = ''                   # 'solving' while a save runs
         self._stop = threading.Event()
@@ -102,6 +117,13 @@ class Hub:
     def on_fix(self, rec: dict):
         with self.lock:
             self.check.add(rec)
+            self.loctest.add(rec)
+
+    def on_camera_info(self, width: int, height: int, fx: float, topic: str = ''):
+        if width <= 0 or fx <= 0:
+            return
+        self.camera_info = {'width': int(width), 'height': int(height), 'fx': round(float(fx), 2),
+                            'hfov_deg': round(hfov_from_camera_info(width, fx), 2), 'topic': topic}
 
     def on_camera(self, which: str, jpeg: bytes):
         for c in list(self.clients):
@@ -164,9 +186,10 @@ class Hub:
     def state(self) -> dict:
         if self.robot is None:
             return {'type': 'state', 'robot': False}
+        loc = self.localizer
         with self.lock:
             check = self.check.summary()
-        loc = self.localizer
+            localize = self.loctest.summary(loc)
         in_use = None
         if loc and loc.get('map'):
             in_use = ('survey' if self._trial_path(loc['map'])
@@ -176,7 +199,8 @@ class Hub:
         if survey is not None:
             survey['frame_options'] = frame_options(survey)
         return {'type': 'state', 'robot': True, 'connected': self.connected(), 'busy': self.busy,
-                'survey': survey, 'localizer': loc, 'check': check,
+                'survey': survey, 'localizer': loc, 'check': check, 'localize': localize,
+                'camera_info': self.camera_info,
                 'map': {'path': self.map_path, 'survey_map': self.survey_map_path(),
                         'localizer_reads': in_use}}
 
@@ -286,6 +310,7 @@ class Hub:
             ok, msg = robot.localizer_set_map(self.map_path)
         with self.lock:
             self.check.reset()
+            self.loctest.reset()
         return msg if ok else f'the localizer did not reload: {msg}'
 
     def map_action(self, body: dict) -> dict:
@@ -338,9 +363,46 @@ class Hub:
                 raise ApiError(f'the localizer did not take the map: {msg}')
             with self.lock:
                 self.check.reset()
+                self.loctest.reset()
             return {'ok': True, 'message': msg, 'map': path}
         raise ApiError(f'unknown action {action!r}: reset or map')
 
     def check_summary(self) -> dict:
         with self.lock:
             return dict(self.check.summary(), ok=True)
+
+    # ------------------------------------------------------------ the localization test
+    def localize_summary(self) -> dict:
+        with self.lock:
+            return dict(self.loctest.summary(self.localizer), ok=True)
+
+    def localize_action(self, body: dict) -> dict:
+        action = body.get('action')
+        if action == 'map':                  # the same as the check screen's choice
+            return self.check_action({'action': 'map', 'which': body.get('which')})
+        with self.lock:
+            if action == 'reset':                 # the path, and the test points unless points: false
+                self.loctest.reset(points=bool(body.get('points', True)))
+                return {'ok': True}
+            if action == 'clear_points':
+                self.loctest.points = []
+                return {'ok': True, 'errors': self.loctest.errors()}
+            if action == 'point':
+                try:
+                    pt = self.loctest.add_point(body.get('x'), body.get('y'), self.localizer)
+                except ValueError as e:
+                    raise ApiError(str(e)) from None
+                return {'ok': True, 'point': pt, 'errors': self.loctest.errors()}
+            if action == 'delete':
+                try:
+                    gone = self.loctest.delete_point(body.get('n'))
+                except (TypeError, ValueError):
+                    raise ApiError('which test point: give its number') from None
+                if not gone:
+                    raise ApiError(f'no test point {body.get("n")}')
+                return {'ok': True, 'errors': self.loctest.errors()}
+        raise ApiError(f'unknown action {action!r}: point, delete, clear_points, reset or map')
+
+    def localize_csv(self) -> str:
+        with self.lock:
+            return self.loctest.csv()

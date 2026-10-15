@@ -319,8 +319,9 @@ as published and ignore the entries with variance 1000 in planar mode.
 ## The web interface
 
 `marker_survey_web_node` serves one page (port 8090) to any browser on the
-robot's network, a phone included: printing and identifying markers, and on
-the robot the survey, the check and the use of the map. It is plain HTML,
+robot's network, a phone included: planning, printing and identifying
+markers, and on the robot (or a laptop with a webcam) the survey, the check,
+the localization test and the use of the map. It is plain HTML,
 CSS and JavaScript shipped with the package, served by Python's standard
 HTTP server: no build step, no internet. It has no login: run it on a
 trusted network, or behind the robot project's own access control; writing
@@ -334,7 +335,33 @@ next to the survey node, started with `start_paused:=true` (the page starts
 the survey and chooses its frame), and the localizer node.
 `examples/ceiling/launch/web.launch.xml site:=$PWD/sites/my_site` starts all
 three for the ceiling example. On a laptop without ROS, `marker_survey_web`
-serves the printing and identifying pages only.
+serves the planning, printing and identifying pages only.
+
+With no robot, `handheld.launch.xml` runs everything on a laptop with a USB
+webcam pointing up at the ceiling, carried along the routes:
+
+```bash
+ros2 launch marker_survey_web handheld.launch.xml site:=$PWD/sites/my_site \
+    camera_params:=$PWD/my_webcam.yaml
+```
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `site` | required | `marker_map.yaml` and `survey/` in it |
+| `launch_camera` | `true` | start `usb_cam` (not a dependency of the package: install `ros-<distro>-usb-cam`); `false`: the images come from elsewhere |
+| `camera_params` | `config/handheld_usb_cam.yaml` | `usb_cam`'s parameters; set `camera_info_url` to the camera's calibration |
+| `camera_namespace` | `camera` | where `usb_cam` publishes `image_raw` and `camera_info` |
+| `camera_frame` | `camera` | the images' `frame_id`: the base frame of both nodes, so no TF is needed |
+| `image_topic`, `camera_info_topic` | `/camera/image_raw`, `/camera/camera_info` | |
+| `survey`, `localizer` | `true`, `true` | run that node (a slow laptop runs one at a time) |
+| `dictionary`, `marker_size` | `tag36h11`, 0.40 | |
+| `localizer_mode` | `3d` | a handheld camera tilts |
+| `host`, `port` | `127.0.0.1`, 8090 | `0.0.0.0`: reachable from a phone |
+| `use_sim_time`, `process_all` | `false` | for a recording |
+
+The survey runs with `pose_source: markers` (the camera alone: each frame
+is placed on the markers already mapped) and starts from a marker, which
+defines the map's frame; the localizer runs with no prior.
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -344,34 +371,59 @@ serves the printing and identifying pages only.
 | `camera_rate`, `camera_width` | 5.0, 640 | [Hz], [px] camera frames sent as JPEG, only while the page shows a camera |
 | `check.agree_distance`, `check.agree_angle_deg` | 0.15, 5.0 | [m], [deg] a fix this close to the estimator's pose agrees |
 | `check.min_samples`, `check.max_disagree` | 5, 0.2 | a marker is flagged when it disagrees in more than this share of at least this many fixes |
+| `camera_info_topic` | `''` | the camera's `camera_info`: the plan screen reads the field of view (2 atan(w / 2 fx)) and the image size from it; empty: not read |
+| `localize.gap_s`, `localize.jump_m` | 1.0, 0.5 | [s], [m] on the test screen, two consecutive fixes farther apart than both are a kidnap |
 
 What it uses: the survey node's `~/status`, `~/start`, `~/pause`, `~/reset`,
 `~/save`, `~/debug/image` and its `frame.*` parameters; the localizer's
 `~/status`, `~/fixes`, `~/reload`, `~/debug/image` and its `marker_map`
 parameter. The screens:
 
+- **Plan** (also without ROS). The ceiling and camera heights (presets: a
+  robot, a person holding the camera), the field of view (or read from the
+  live `camera_info`), the image size, the speed and the exposure give,
+  from `core/marker_plan.py`: the readable size range, the recommended size
+  and sheet, the zone R, the spacing D for a marker always in view with no
+  odometry (2R), and the marker count for a route length. A side view drawn
+  from the same numbers shows the camera, its field of view, the width it
+  covers on the ceiling and the markers at spacing D; "Print these markers"
+  opens the print tab with that size and the IDs.
 - **Survey.** Start: "Use the robot's map" (`align_to_track` when the
   survey has a `frame.reference_frame`, else `pose_frame`) or "Start from a
   marker" (`origin_marker`). While driving: the camera with the detections
   drawn, the map from above, the markers with a light each and hints. Save:
   the solve runs on the robot and the report opens; "Drive again" adds to
   the same recording, and the next save keeps the earlier one in
-  `history/`.
+  `history/`. With `pose_source: markers` (the camera alone) only "Start
+  from a marker" is offered, and a banner says when no mapped marker is in
+  view: "go back to marker N" (`tracking`, `lost_since` and
+  `last_known_marker` of the survey's status).
 - **Check.** The localizer on the map just surveyed (a trial: its
   `marker_map` is pointed at the survey's file, nothing is written) or on
   the map in use; each fix against the estimator's pose (the prior at the
   image's stamp), the distance, and per marker how often it agreed. A marker
   that disagrees is flagged: it moved, or it was surveyed badly.
+- **Test localization.** For a localizer with no prior (a handheld camera,
+  or a robot whose estimator is off): the camera with the detections, the
+  pose (x, y, yaw, and z in 3d), the time since the last fix ("no marker in
+  view for N s"), and the map from above with the trajectory. A kidnap (two
+  fixes more than `localize.gap_s` apart in time and `localize.jump_m` in
+  position: the pose froze, then jumped) is drawn dashed and listed. Test
+  points: the person types the x and y measured with a tape and the
+  localizer's latest pose is stored beside them; a table of errors (mean,
+  RMS, largest) and a CSV download.
 - **Use the map.** What changes (markers added, removed, moved), then, after
   a confirmation, the survey's map is written to `map_path`; the file it
   replaces is kept in `marker_map_versions/` beside it, and the localizer
   reads the new one at once. Undo puts the newest kept version back.
 
-The JSON API (`GET /api/state`, `POST /api/survey`, `GET /api/report`,
-`GET|POST /api/map`, `GET|POST /api/check`, WebSocket `/api/live`) is
+The JSON API (`GET /api/state`, `POST /api/plan`, `POST /api/survey`,
+`GET /api/report`, `GET|POST /api/map`, `GET|POST /api/check`,
+`GET|POST /api/localize`, `GET /api/localize.csv`, WebSocket `/api/live`) is
 listed in `marker_survey_web/marker_survey_web/server.py`; a robot project
 can embed the page in its own interface with a link or an iframe, and open a
-step directly (`/#survey`, `/#check`, `/#use`).
+step directly (`/#plan`, `/#survey`, `/#check`, `/#localize`, `/#use`;
+`/#print?size=40&count=23&ids=0-22` fills in a print job).
 
 ## The examples
 

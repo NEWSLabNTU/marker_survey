@@ -4,9 +4,10 @@
         -p map_path:=$PWD/sites/my_site/marker_map.yaml
     ros2 launch marker_survey_web web.launch.xml map_path:=...
 
-Serves the same page as marker_survey_web, plus the survey, check and map
-screens, which drive the survey node (start it with start_paused:=true) and
-the localizer node. Parameters:
+Serves the same page as marker_survey_web, plus the survey, check, localization
+test and map screens, which drive the survey node (start it with
+start_paused:=true) and the localizer node. With no robot, handheld.launch.xml
+runs it on a laptop with a webcam. Parameters:
 
   host, port            where the page is served (default 0.0.0.0:8090: any device on
                         the robot's network)
@@ -16,6 +17,10 @@ the localizer node. Parameters:
                         empty: the localizer's marker_map when it is first heard from
   camera_rate           [Hz] camera frames sent to a page that shows them
   camera_width          [px] their width
+  camera_info_topic     the camera's camera_info: the plan screen reads the field of view
+                        and the image size from it; empty: not read
+  localize.gap_s        [s] and localize.jump_m [m]: on the test screen, two fixes farther
+                        apart than both are a kidnap (the pose froze, then jumped)
   check.agree_distance  [m] and check.agree_angle_deg: a fix this close to the fused
                         pose agrees; check.min_samples, check.max_disagree: when a
                         marker is flagged
@@ -31,10 +36,13 @@ PARAMETERS = {
     'map_path': '',
     'camera_rate': 5.0,
     'camera_width': 640,
+    'camera_info_topic': '',
     'check.agree_distance': 0.15,
     'check.agree_angle_deg': 5.0,
     'check.min_samples': 5,
     'check.max_disagree': 0.2,
+    'localize.gap_s': 1.0,
+    'localize.jump_m': 0.5,
 }
 
 
@@ -45,6 +53,7 @@ def main(args=None):
 
     from marker_localizer.core.check import CheckSettings
     from marker_survey_web.hub import Hub
+    from marker_survey_web.loctest import LocTestSettings
     from marker_survey_web.ros_bridge import RosRobot
     from marker_survey_web.server import make_server
 
@@ -56,9 +65,10 @@ def main(args=None):
     hub = Hub(None, str(gp('map_path')), CheckSettings(
         agree_distance=float(gp('check.agree_distance')),
         agree_angle_deg=float(gp('check.agree_angle_deg')),
-        min_samples=int(gp('check.min_samples')), max_disagree=float(gp('check.max_disagree'))))
+        min_samples=int(gp('check.min_samples')), max_disagree=float(gp('check.max_disagree'))),
+        LocTestSettings(gap_s=float(gp('localize.gap_s')), jump_m=float(gp('localize.jump_m'))))
     hub.robot = RosRobot(node, hub, str(gp('survey_node')), str(gp('localizer_node')),
-                         float(gp('camera_rate')), int(gp('camera_width')))
+                         float(gp('camera_rate')), int(gp('camera_width')), str(gp('camera_info_topic')))
     try:
         server = make_server(str(gp('host')), int(gp('port')), hub)
     except OSError as e:

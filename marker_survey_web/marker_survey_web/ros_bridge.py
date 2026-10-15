@@ -1,7 +1,8 @@
 """The web interface's link to the survey and localizer nodes (rclpy).
 
 Subscribes to the survey node's ~/status, the localizer's ~/status and
-~/fixes, and, only while a page shows a camera, to their ~/debug/image, sent
+~/fixes, the camera's camera_info (if camera_info_topic is set: the plan screen
+reads the field of view from it), and, only while a page shows a camera, to their ~/debug/image, sent
 on as JPEG at camera_rate. Calls their services (std_srvs/Trigger) and sets
 their parameters for the page's actions. Everything else is in hub.py.
 """
@@ -14,7 +15,7 @@ from rcl_interfaces.srv import SetParameters
 from rclpy.clock import Clock, ClockType
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
@@ -39,7 +40,7 @@ def image_to_jpeg(msg, width: int, quality: int = 75):
 
 class RosRobot:
     def __init__(self, node, hub, survey_node='/marker_survey', localizer_node='/marker_localizer',
-                 camera_rate=5.0, camera_width=640):
+                 camera_rate=5.0, camera_width=640, camera_info_topic=''):
         self.node, self.hub = node, hub
         self.survey_ns, self.loc_ns = survey_node.rstrip('/'), localizer_node.rstrip('/')
         self.period = 1.0 / max(camera_rate, 0.1)
@@ -54,6 +55,10 @@ class RosRobot:
         self.reload = node.create_client(Trigger, f'{self.loc_ns}/reload')
         self.set_survey = node.create_client(SetParameters, f'{self.survey_ns}/set_parameters')
         self.set_loc = node.create_client(SetParameters, f'{self.loc_ns}/set_parameters')
+        if camera_info_topic:
+            self.info_topic = camera_info_topic
+            node.create_subscription(CameraInfo, camera_info_topic, self.on_camera_info,
+                                     qos_profile_sensor_data)
         self.cameras = {}                  # which -> (subscription, last sent)
         self.topics = {'survey': f'{self.survey_ns}/debug/image', 'check': f'{self.loc_ns}/debug/image'}
         node.create_timer(0.5, self.manage_cameras, clock=Clock(clock_type=ClockType.STEADY_TIME))
@@ -76,6 +81,9 @@ class RosRobot:
             self.hub.on_fix(json.loads(msg.data))
         except ValueError:
             pass
+
+    def on_camera_info(self, msg):
+        self.hub.on_camera_info(msg.width, msg.height, msg.k[0], self.info_topic)
 
     def manage_cameras(self):
         """Subscribe to a debug image only while a page shows it: the nodes draw it only

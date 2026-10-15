@@ -127,3 +127,60 @@ def test_one_launch_file_starts_the_three_nodes_under_their_own_names(tmp_path, 
             except subprocess.TimeoutExpired:
                 os.killpg(p.pid, signal.SIGKILL)
                 p.wait()
+
+
+def test_the_handheld_launch_file_runs_with_no_robot_frames(tmp_path, monkeypatch):
+    """handheld.launch.xml without the camera driver: the survey (camera alone), the
+    localizer and the web node start with the camera's frame as their base, no TF; the
+    page sees the survey in pose_source markers."""
+    import json
+    import urllib.request
+    if shutil.which('ros2') is None:
+        pytest.skip('ros2 not on PATH')
+    try:
+        for pkg in ('marker_survey', 'marker_localizer', 'marker_survey_web'):
+            ament.get_package_share_directory(pkg)
+    except Exception:  # noqa: BLE001
+        pytest.skip('the packages are not installed')
+    from marker_survey.params import POSE_SOURCES
+    if 'markers' not in POSE_SOURCES:
+        pytest.skip('the survey has no camera-only pose source yet')
+    if not os.environ.get('ROS_DOMAIN_ID'):
+        monkeypatch.setenv('ROS_DOMAIN_ID', str(60 + os.getpid() % 30))
+    port = free_port()
+    log = open(tmp_path / 'launch.log', 'w+')
+    p = subprocess.Popen(['ros2', 'launch', 'marker_survey_web', 'handheld.launch.xml',
+                          f'site:={tmp_path}/site', f'port:={port}', 'launch_camera:=false'],
+                         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    rclpy.init()
+    node = rclpy.create_node('launch_names_test')
+    try:
+        nodes = {'/marker_survey', '/marker_localizer', '/marker_survey_web'}
+        names, _ = graph(node, 30.0, lambda n, t: nodes <= n)
+        log.seek(0)
+        assert nodes <= names, (names, log.read()[-2000:])
+        st, t_end = {}, time.monotonic() + 30.0
+        while time.monotonic() < t_end:
+            try:
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/state', timeout=2) as r:
+                    st = json.loads(r.read())
+                if (st.get('survey') or {}).get('pose_source') and st.get('localizer'):
+                    break
+            except OSError:
+                pass
+            time.sleep(0.5)
+        log.seek(0)
+        out = log.read()[-2000:]
+        assert st['survey']['pose_source'] == 'markers', (st, out)
+        assert st['localizer']['mode'] == '3d' and not st['localizer']['prior_topic'], (st, out)
+        assert not st['survey']['frame_options'][0]['available']
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGINT)
+            try:
+                p.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()

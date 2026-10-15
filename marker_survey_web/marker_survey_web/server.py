@@ -1,5 +1,5 @@
-"""marker_survey_web: the browser interface. Print markers, identify markers; on the robot
-also survey, check and use the map.
+"""marker_survey_web: the browser interface. Plan and print markers, identify markers; on the
+robot (or a laptop with a camera) also survey, check, test and use the map.
 
     marker_survey_web                      # http://127.0.0.1:8090 on this computer
     marker_survey_web --host 0.0.0.0       # reachable from a phone on the same network
@@ -15,7 +15,10 @@ downloaded here is the one marker_sheets writes.
 
 API (JSON in and out unless said otherwise):
 
-  GET  /api/info              dictionaries, papers, defaults
+  GET  /api/info              dictionaries, papers, defaults, the plan's presets
+  POST /api/plan              ceiling and camera heights, field of view, image size, speed,
+                              exposure (or a preset: robot, handheld), route length ->
+                              size range, recommended size and sheet, zone R, spacings, count
   POST /api/sheets/plan       a print job -> summary, warnings, SVG previews
   POST /api/sheets/download   a print job + "format": pdf | zip | csv -> the file
   POST /api/size              ceiling height, camera -> recommended marker size
@@ -32,8 +35,17 @@ On the robot (hub.py; without a robot they answer {"ok": false}):
   POST /api/map               {"action": "preview"}; {"action": "use" | "undo", "confirm": true}
   GET  /api/check             fixes against the fused pose, per-marker agreement
   POST /api/check             {"action": "reset"}; {"action": "map", "which": "survey" | "site"}
+  GET  /api/localize          the localization test: pose, time since the last fix, the
+                              trajectory with its kidnap events, test points and their errors
+  POST /api/localize          {"action": "point", "x": 1.2, "y": 0.0} (measured with a tape);
+                              {"action": "delete", "n": 3}; {"action": "clear_points"};
+                              {"action": "reset"} (the path and the points; "points": false
+                              keeps the points);
+                              {"action": "map", "which": "survey" | "site"}
+  GET  /api/localize.csv      the test points as CSV
   WS   /api/live              the state twice a second (JSON); camera frames as JPEG (binary)
                               while the page asks for them: {"camera": "survey" | "check" | null}
+                              (check: the localizer's camera, on the check and test screens)
 
 A print job: {"size": "45cm", "count": 24, "ids": "", "dictionary": "tag36h11",
 "paper": "auto", "border": "", "per_page": "auto", "split": false,
@@ -95,8 +107,9 @@ def api_info(_body=None) -> dict:
     names = COMMON + ['DICT_4X4_50', 'DICT_4X4_100', 'DICT_4X4_250', 'DICT_5X5_50', 'DICT_5X5_100',
                       'DICT_5X5_250', 'DICT_6X6_250', 'tag36h10']
     dicts = [n for n in dict.fromkeys(names) if hasattr(cv2.aruco, opencv_dictionary_name(n))]
+    from marker_survey_web.planner import presets
     return {'dictionaries': dicts, 'default_dictionary': DEFAULT_DICTIONARY,
-            'papers': list(PAPERS), 'auto_papers': AUTO_PAPERS}
+            'papers': list(PAPERS), 'auto_papers': AUTO_PAPERS, 'presets': presets()}
 
 
 def api_plan(body: dict) -> dict:
@@ -147,6 +160,14 @@ def api_size(body: dict) -> dict:
             'readable_from_cm': round(p['s_min'] * 100), 'fits_up_to_cm': round(p['s_max'] * 100)}
 
 
+def api_site_plan(body: dict) -> dict:
+    from marker_survey_web.planner import PlanError, site_plan
+    try:
+        return site_plan(body)
+    except PlanError as e:
+        raise ApiError(str(e)) from None
+
+
 def api_identify(body: dict) -> dict:
     import cv2
     import numpy as np
@@ -174,7 +195,8 @@ def api_identify(body: dict) -> dict:
             'image': 'data:image/jpeg;base64,' + base64.b64encode(jpg.tobytes()).decode()}
 
 
-ROUTES = {'/api/sheets/plan': api_plan, '/api/size': api_size, '/api/identify': api_identify}
+ROUTES = {'/api/sheets/plan': api_plan, '/api/size': api_size, '/api/identify': api_identify,
+          '/api/plan': api_site_plan}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -205,8 +227,11 @@ class Handler(BaseHTTPRequestHandler):
             if not ws.is_upgrade(self.headers):
                 return self._send(HTTPStatus.BAD_REQUEST, 'text/plain', b'a WebSocket address')
             return self.live(hub)
+        if path == '/api/localize.csv':
+            return self._send(HTTPStatus.OK, 'text/csv; charset=utf-8', hub.localize_csv().encode(),
+                              {'Content-Disposition': 'attachment; filename="localization_test.csv"'})
         gets = {'/api/state': hub.state, '/api/report': hub.report, '/api/map': hub.map_info,
-                '/api/check': hub.check_summary}
+                '/api/check': hub.check_summary, '/api/localize': hub.localize_summary}
         if path in gets:
             try:
                 return self._json(gets[path]())
@@ -241,7 +266,8 @@ class Handler(BaseHTTPRequestHandler):
                                   {'Content-Disposition': f'attachment; filename="{name}"'})
             hub = self.server.hub
             fn = {'/api/survey': hub.survey_action, '/api/map': hub.map_action,
-                  '/api/check': hub.check_action}.get(path) or ROUTES.get(path)
+                  '/api/check': hub.check_action,
+                  '/api/localize': hub.localize_action}.get(path) or ROUTES.get(path)
             if fn is None:
                 return self._json({'ok': False, 'error': 'unknown address'}, HTTPStatus.NOT_FOUND)
             return self._json(fn(body))

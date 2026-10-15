@@ -37,8 +37,30 @@ function job() {
   };
 }
 
+// the address names a tab and, for the print tab, a job: #print?size=40&count=12&ids=0-11
+function hashParams() {
+  const q = location.hash.split('?')[1] || '';
+  return new URLSearchParams(q);
+}
+
+function applyPrintParams() {
+  const p = hashParams();
+  if (!p.has('size') && !p.has('count') && !p.has('ids')) return false;
+  if (p.has('size')) { $('size').value = p.get('size'); $('size_unit').value = p.get('unit') || 'cm'; }
+  $('border_unit').textContent = $('size_unit').value;
+  if (p.has('ids')) {
+    document.querySelector('input[name="id_mode"][value="list"]').checked = true;
+    $('ids').value = p.get('ids');
+  } else if (p.has('count')) {
+    document.querySelector('input[name="id_mode"][value="auto"]').checked = true;
+  }
+  if (p.has('count')) $('count').value = p.get('count');
+  if (p.has('ids')) $('ids').closest('details').open = true;
+  return true;
+}
+
 function showTab() {
-  const name = location.hash.slice(1);
+  const name = location.hash.slice(1).split('?')[0];
   const tab = document.querySelector(`.tab[data-tab="${name}"]`);
   const t = tab && !tab.hidden ? tab : document.querySelector('.tab');
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
@@ -148,6 +170,8 @@ async function init() {
     location.hash = t.dataset.tab;
   }));
   window.addEventListener('hashchange', showTab);
+  document.addEventListener('tabchange', (e) => { if (e.detail === 'print' && applyPrintParams()) update(); });
+  applyPrintParams();
   showTab();
 
   $('job').addEventListener('input', later);
