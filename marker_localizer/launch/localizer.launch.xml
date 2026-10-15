@@ -15,6 +15,7 @@
 -->
 <launch>
   <arg name="marker_map" description="the site's marker_map.yaml"/>
+  <arg name="node_name" default="marker_localizer" description="the node's name; its ~/ topics and services follow it"/>
   <arg name="mode" default="planar" description="planar (x, y, yaw on a flat floor) or 3d (6-DoF)"/>
   <arg name="base_frame" default="base_link"/>
   <arg name="image_topic" default="/camera/image"/>
@@ -41,7 +42,7 @@
   <arg name="param_file" default="$(find-pkg-share marker_localizer)/config/no_params.yaml"
        description="YAML of node parameters, read last: its values win over the arguments"/>
 
-  <node pkg="marker_localizer" exec="marker_localizer" name="marker_localizer" output="screen">
+  <node pkg="marker_localizer" exec="marker_localizer" name="$(var node_name)" output="screen">
     <param name="marker_map" value="$(var marker_map)"/>
     <param name="mode" value="$(var mode)"/>
     <param name="base_frame" value="$(var base_frame)"/>

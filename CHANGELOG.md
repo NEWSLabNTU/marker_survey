@@ -6,6 +6,13 @@ its own `version` (now 1); the loader keeps reading older versions.
 
 ## Unreleased
 
+### Launch files
+
+- `localizer.launch.xml`, `survey.launch.xml` and `web.launch.xml` take
+  `node_name` (defaults `marker_localizer`, `marker_survey`,
+  `marker_survey_web`, as before); the nodes' `~/` topics and services
+  follow it.
+
 ### Tools
 
 - `marker_map_import --source-name NAME`: the name the map's header gives

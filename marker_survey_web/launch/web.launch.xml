@@ -13,14 +13,15 @@
 -->
 <launch>
   <arg name="map_path" default="" description="the map the localizer reads; empty: the localizer's marker_map"/>
+  <arg name="node_name" default="marker_survey_web" description="this node's name"/>
   <arg name="host" default="0.0.0.0" description="127.0.0.1: this computer only"/>
   <arg name="port" default="8090"/>
-  <arg name="survey_node" default="/marker_survey"/>
-  <arg name="localizer_node" default="/marker_localizer"/>
+  <arg name="survey_node" default="/marker_survey" description="the survey node (its node_name, with a namespace if any)"/>
+  <arg name="localizer_node" default="/marker_localizer" description="the localizer node (its node_name, with a namespace if any)"/>
   <arg name="camera_rate" default="5.0" description="[Hz] camera frames sent to a page that shows them"/>
   <arg name="use_sim_time" default="false"/>
 
-  <node pkg="marker_survey_web" exec="marker_survey_web_node" name="marker_survey_web" output="screen">
+  <node pkg="marker_survey_web" exec="marker_survey_web_node" name="$(var node_name)" output="screen">
     <param name="map_path" value="$(var map_path)"/>
     <param name="host" value="$(var host)"/>
     <param name="port" value="$(var port)"/>

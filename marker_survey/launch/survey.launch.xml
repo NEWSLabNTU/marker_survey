@@ -16,6 +16,7 @@
 -->
 <launch>
   <arg name="output_dir" description="where marker_map.yaml, survey_report.yaml and survey_data.npz are written"/>
+  <arg name="node_name" default="marker_survey" description="the node's name; its ~/ topics and services follow it"/>
   <arg name="dictionary" default="DICT_5X5_1000" description="the printed family: an OpenCV DICT_* name or tag36h11, tag25h9, ..."/>
   <arg name="marker_size" default="0.38" description="[m] edge of the BLACK SQUARE, not of the sheet: measure it"/>
   <arg name="frame_mode" default="origin_marker" description="origin_marker, pose_frame or align_to_track"/>
@@ -37,7 +38,7 @@
   <arg name="param_file" default="$(find-pkg-share marker_survey)/config/no_params.yaml"
        description="YAML of node parameters, read last: its values win over the arguments"/>
 
-  <node pkg="marker_survey" exec="marker_survey" name="marker_survey" output="screen">
+  <node pkg="marker_survey" exec="marker_survey" name="$(var node_name)" output="screen">
     <param name="output_dir" value="$(var output_dir)"/>
     <param name="dictionary" value="$(var dictionary)"/>
     <param name="marker_size" value="$(var marker_size)"/>

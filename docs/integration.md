@@ -158,6 +158,13 @@ the change is refused if it does not load. A map file that does not exist
 when the node starts is waited for (a new site): the node publishes nothing
 until `~/reload` or a new `marker_map` finds one.
 
+The launch file's `node_name` argument (default `marker_localizer`) names
+the node, and its `~/` topics and services follow: `node_name:=markers_front`
+publishes `/markers_front/pose`; `survey.launch.xml` (default
+`marker_survey`) and `web.launch.xml` (default `marker_survey_web`) take
+the same argument, and the web node's `survey_node` and `localizer_node`
+then name the renamed nodes.
+
 Parameters (`marker_localizer/marker_localizer/params.py`; the launch file
 passes the ones marked with an argument of the same name, and any of them
 from a YAML file, `param_file:=my_localizer.yaml`, read after the arguments
@@ -319,7 +326,7 @@ serves the printing and identifying pages only.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `host`, `port` | `0.0.0.0`, 8090 | where the page is served; `127.0.0.1`: this computer only |
-| `survey_node`, `localizer_node` | `/marker_survey`, `/marker_localizer` | the nodes it talks to |
+| `survey_node`, `localizer_node` | `/marker_survey`, `/marker_localizer` | the nodes it talks to: their `node_name`, with a namespace if any |
 | `map_path` | `''` | the map the localizer reads, which "Use the map" writes; empty: the localizer's `marker_map` when it is first heard from |
 | `camera_rate`, `camera_width` | 5.0, 640 | [Hz], [px] camera frames sent as JPEG, only while the page shows a camera |
 | `check.agree_distance`, `check.agree_angle_deg` | 0.15, 5.0 | [m], [deg] a fix this close to the estimator's pose agrees |

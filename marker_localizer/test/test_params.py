@@ -46,5 +46,5 @@ def test_the_launch_file_passes_its_arguments_with_the_node_defaults():
             want = str(default).lower() if isinstance(default, bool) else str(default)
             assert args[name] == want, (name, args[name], default)
     for name in ('max_distance', 'min_sd', 'min_sd_deg', 'max_position_sd', 'require_prior',
-                 'prior_tolerance', 'param_file'):
+                 'prior_tolerance', 'param_file', 'node_name'):
         assert name in args, name
