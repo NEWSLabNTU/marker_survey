@@ -29,7 +29,7 @@ board is open; adoption by a robot and the web interface come next.
 |---|---|
 | `marker_survey` | `marker_survey.core` (detection, SE(3), the survey and its bundle adjustment, frames, the map file, the report, simulation and rendering; plain Python, no ROS), the survey node, command-line tools |
 | `marker_localizer` | `marker_localizer.core.localize` (the 3d and planar solvers, covariance, gate; no ROS), the localizer node, its evaluation and scoring tools |
-| `marker_survey_web` | placeholder for the browser interface (phase 5) |
+| `marker_survey_web` | the browser interface: printing marker sheets and identifying markers from a photo (the rest of phase 5 to come) |
 
 ## Install
 
@@ -222,6 +222,68 @@ recording, plays it through the node and scores the fixes against the truth;
 `marker_localizer_evaluate` runs both modes and the source implementations'
 methods on the same frames without ROS.
 
+## Printing markers
+
+From a browser, on a laptop or the robot (no ROS needed for this part):
+
+```bash
+ros2 run marker_survey_web marker_survey_web --open          # http://127.0.0.1:8090
+ros2 run marker_survey_web marker_survey_web --host 0.0.0.0  # also from a phone on the network
+```
+
+Give the marker size (the edge of the black square) and how many markers;
+the page shows the paper, the IDs and a preview of every page, and
+downloads the PDF. "Don't know the size?" works it out from the ceiling
+height and the camera (`marker_plan`). The "Identify a marker" tab reads the
+IDs from a phone photo of a sheet or a ceiling.
+
+The same from a terminal:
+
+```bash
+marker_sheets --size 45cm --count 24 -o markers.pdf                    # smallest of A4 to A0 that fits
+marker_sheets --size 45cm --count 24 --paper A1 -o markers.pdf
+marker_sheets --size 45cm --count 24 --paper exact --border 6cm -o markers.pdf
+marker_sheets --size 45cm --count 24 --split -o markers/               # one PDF per marker
+marker_sheets --size 12cm --ids 0-9 --paper A4 -o small.pdf             # these IDs, four per page
+marker_sheets --size 45cm --count 6 --site site/marker_map.yaml -o more.pdf   # skip IDs in use
+marker_identify photo.jpg                                              # which markers are these?
+```
+
+| Choice | Default | Options |
+|---|---|---|
+| marker size | required, with a unit | `450mm`, `45cm`, `0.45m`, `17.7in` |
+| how many | required unless IDs are given | |
+| dictionary | `tag36h11` | any OpenCV ArUco or AprilTag dictionary |
+| IDs | chosen for you | `--ids 0-9` or `3,7,12`; `--site`/`--exclude` keeps IDs in use out |
+| paper | the smallest of A4, A3, A2, A1, A0 that fits | A0 to A6, B1 to B5, Letter, Legal, Tabloid, `600x850mm`, or `exact` (the page is the marker and its white border) |
+| white border | one cell of the marker | `--border 6cm` |
+| output | one PDF, a page per marker | `--split`: a PDF per marker, named `tag36h11_45cm_id017.pdf` |
+| labels | ID on each sheet | `--no-label`, `--back-labels` (a page with the ID in large print after each, for duplex) |
+
+**The IDs chosen for you** are the same every time for the same dictionary,
+count and exclusions: starting from the lowest free ID, each next one is the
+ID whose bits differ most from all chosen so far and from the ones already
+in use, in any rotation. Markers that differ in many bits are the hardest to
+mistake for one another (24 tag36h11 markers come out at least 13 bits
+apart).
+
+**Every marker says its ID**, because a sheet without a label is easy to
+lose track of: the PDF's bookmark and page label ("id 17"), the file name
+with `--split`, the ID in large print outside the white border (with an
+arrow for the top), small and grey in the border's bottom-right corner on
+an exact-size page (which also marks the marker's bottom edge), an optional
+back page, and a contact sheet at the end of the PDF plus a CSV list
+(`markers.csv`, or `<name>.csv`), with a "placed where" column to fill in on
+site. Once a marker is up, a photo tells its ID (`marker_identify`, or the
+web page's "Identify a marker").
+
+Pages are vector graphics, one rectangle per run of black cells, so the
+printer gets exact millimetres. Each page has a 100 mm scale bar: print at
+actual size, check it with a ruler, then measure the black square of a
+printed sheet; that length is the `marker_size` of the survey. The tests
+render every kind of page with pdftoppm and read the IDs and the size back
+with the detector.
+
 ## Tools
 
 Each runs as `ros2 run marker_survey <command>` (the last three as
@@ -239,6 +301,10 @@ Each runs as `ros2 run marker_survey <command>` (the last three as
 | `marker_localizer` (node) | the localizer |
 | `marker_localizer_evaluate` | both modes and the source methods on a rendered or corner-level scene, no ROS |
 | `marker_localizer_score` | a recording of the localizer's fixes against the truth |
+| `marker_sheets` | print-ready PDF sheets of markers at an exact size (below) |
+| `marker_identify` | the marker IDs in a photo |
+
+`ros2 run marker_survey_web marker_survey_web` serves the browser interface.
 
 ## Accuracy
 

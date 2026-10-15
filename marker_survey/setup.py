@@ -31,6 +31,8 @@ setup(
             'marker_map_check = marker_survey.tools.map_check:main',
             'marker_map_import = marker_survey.tools.map_import:main',
             'marker_plan = marker_survey.tools.plan:main',
+            'marker_sheets = marker_survey.tools.sheets:main',
+            'marker_identify = marker_survey.tools.identify:main',
         ],
     },
 )

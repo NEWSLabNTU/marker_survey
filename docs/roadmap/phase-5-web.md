@@ -84,12 +84,36 @@ previous version back.
 
 ## Tasks
 
-- [ ] Node, static files, JSON API, WebSocket
-- [ ] Plan and print (PDF with reportlab or cairo; markers drawn by OpenCV)
+- [ ] Node, static files, JSON API, WebSocket (done: the HTTP server, static
+      files and JSON API for printing and identifying; still to come: the
+      WebSocket and the ROS side for the survey and check screens)
+- [x] Plan and print, pulled forward: `marker_sheets` and `marker_identify`
+      on the command line, and the "Print markers" and "Identify a marker"
+      pages (below)
 - [ ] Survey screens on top of the phase 2 node
 - [ ] Check screen on top of the phase 3 localizer
 - [ ] Map use, versions, undo, localizer reload
 - [ ] Browser test; usability session
+
+## Printing and identifying, done ahead of the rest
+
+- **Command line** (`marker_survey`): `marker_sheets` (size and count, or
+  IDs; paper or exact size with a white border; one PDF or one per marker;
+  labels, back labels, contact sheet, CSV) and `marker_identify` (IDs from a
+  photo, any common family). `core/sheets.py` and `core/identify.py`, no
+  ROS. The PDF is written directly as vector graphics; no reportlab or
+  cairo dependency.
+- **Web** (`marker_survey_web`): Python's standard HTTP server, no ROS, a
+  static page: size and count first, paper, output, labels, then the
+  dictionary, IDs and site exclusions under "More"; a live summary with
+  plain-language checks, previews of the pages drawn from the same layout
+  as the PDF, downloads (PDF, zip of PDFs, CSV); "Don't know the size?"
+  runs the ceiling planner; "Identify a marker" takes a photo, also from a
+  phone's camera.
+- **Tests**: unit tests of units, papers, ID choice, layouts and the PDF;
+  every kind of page rendered with pdftoppm and read back with the
+  detector (IDs and the black square's size within a pixel); the web API
+  against a running server.
 
 ## Done when
 
