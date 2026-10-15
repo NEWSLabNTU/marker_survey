@@ -4,7 +4,7 @@ Versions follow semantic versioning. Every change of a parameter, a launch
 argument, a topic or a file format gets an entry. The marker map file has
 its own `version` (now 1); the loader keeps reading older versions.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-15)
 
 The first release: the survey, the marker map file and the localizer for
 both setups, wall boards and ceiling markers, with the tools, the printing
