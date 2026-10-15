@@ -134,9 +134,22 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/sites/my_site
 | `imu_topic` (in, `roll_pitch: imu`) | `sensor_msgs/Imu` | its orientation gives roll and pitch |
 | `pose_topic` (out, default `~/pose`, so `/marker_localizer/pose`) | `geometry_msgs/PoseWithCovarianceStamped` | `base_frame` in the map's `frame_id`, stamped with the image's capture time |
 | `~/debug/image` (out) | `sensor_msgs/Image` | markers used (green, map corners projected with the fix as dots, residual written), left out (orange), unusable (red), not in the map (grey), and the fix; only while subscribed |
-| `~/fixes` (out) | `std_msgs/String` | JSON per image with markers, only while subscribed: the fix (or why none), the prior at its stamp, the distance between them, and what became of each marker in view (`marker_localizer/core/check.py`) |
+| `~/fixes` (out) | `std_msgs/String` | JSON per image with markers, only while subscribed: the fix (or why none), the prior at its stamp, the distance between them, and per marker in view what became of it and its check (below) (`marker_localizer/core/check.py`) |
+| `~/markers` (out) | `diagnostic_msgs/DiagnosticArray` | per image with markers, only while subscribed: one status per marker in view, `marker_localizer: marker <id>`, level WARN when left out as an outlier, else OK; values below |
 | `~/status` (out) | `std_msgs/String` | JSON every second, only while subscribed: the map file in use, its markers, the counts |
 | `~/reload` (service) | `std_srvs/Trigger` | read the map file again; a file that does not load is refused and the old map stays |
+
+Per-marker checks, in `~/fixes` (per marker) and `~/markers` (as key-value
+pairs): `state` (`used`, `outlier`, `unused`, `unusable`, `unknown`);
+`residual_px`, the RMS distance of the marker's map corners projected with
+the fix from its detected corners, also for a marker left out of the fix;
+`seen` (`seen_x`, `seen_y`, `seen_z`), the marker's centre in the map frame
+as this image alone sees it, placed by the prior (`seen_from: prior`) or,
+without a prior, by the fix (`seen_from: fix`); `offset_m` and `angle_deg`,
+its distance and rotation from the map's pose. A robot project checks its
+camera and each marker with them: a marker whose `offset_m` stays well
+above the prior's own noise has moved or was surveyed badly; a camera whose
+markers all show the same offset has a wrong mounting TF.
 
 `marker_map` can also be set at run time: the new file is read at once, and
 the change is refused if it does not load. A map file that does not exist

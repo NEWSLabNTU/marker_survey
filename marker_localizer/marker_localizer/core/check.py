@@ -14,6 +14,14 @@ JSON on ~/fixes); the web interface's check screen sums them up
   or it was surveyed badly.
 
 Without a prior there is nothing to compare with; the fixes are still counted.
+
+Per marker in view, `marker_views` adds what a robot project needs to check
+each marker and its camera by itself: the corners' reprojection error with
+the fix (also for a marker left out as an outlier), and the marker's pose as
+this one image sees it, placed in the map by the prior (or by the fix, when
+there is no prior), with its offset and angle from the map's pose. The node
+publishes both in ~/fixes and as diagnostic_msgs/DiagnosticArray on
+~/markers.
 """
 
 from collections import deque
@@ -23,9 +31,10 @@ from typing import Dict, Optional
 
 import numpy as np
 
+from marker_survey.core.detection import marker_pose_in_camera
 from marker_survey.core.se3 import rotation_angle
 
-from marker_localizer.core.localize import Result, rms, wrap, yaw_of
+from marker_localizer.core.localize import Localizer, Result, rms, wrap, yaw_of
 
 
 def _pose(T, planar: bool) -> dict:
@@ -36,10 +45,51 @@ def _pose(T, planar: bool) -> dict:
     return out
 
 
+def marker_views(loc: Localizer, res: Result, detections, T_prior: Optional[np.ndarray]) -> dict:
+    """{id: dict} for every usable marker of the map in view:
+
+    residual_px   corner reprojection RMS with the fix [px], used or not (corners behind
+                  the camera: large)
+    seen          {x, y, z}: the marker's centre as this image alone sees it, in the map
+                  frame, from the robot pose `seen_from`
+    seen_from     'prior' (the state estimator's pose: independent of the markers) or
+                  'fix' (no prior; the marker took part in it unless left out)
+    offset_m      distance of `seen` from the marker's map position
+    angle_deg     rotation between the seen and the map orientation
+    """
+    fix = res.fix
+    if T_prior is not None:
+        T_ref, src = T_prior, 'prior'
+    elif fix is not None:
+        T_ref, src = fix.T_map_base, 'fix'
+    else:
+        T_ref, src = None, None
+    out = {}
+    for d in detections:
+        if d.rejected is not None or d.id not in loc.poses:
+            continue
+        v = {}
+        if fix is not None:
+            px = loc.project(fix.T_map_base, loc.corners[d.id])
+            v['residual_px'] = round(rms(np.linalg.norm(px - d.corners, axis=1)), 3)
+        if T_ref is not None:
+            T_cm, _ = marker_pose_in_camera(d, loc.K, loc.sizes[d.id])
+            if np.all(np.isfinite(T_cm)):
+                T = T_ref @ loc.T_base_cam @ T_cm
+                M = loc.poses[d.id]
+                v['seen'] = {'x': round(float(T[0, 3]), 4), 'y': round(float(T[1, 3]), 4),
+                             'z': round(float(T[2, 3]), 4)}
+                v['seen_from'] = src
+                v['offset_m'] = round(float(np.linalg.norm(T[:3, 3] - M[:3, 3])), 4)
+                v['angle_deg'] = round(math.degrees(rotation_angle(T[:3, :3], M[:3, :3])), 2)
+        out[int(d.id)] = v
+    return out
+
+
 def fix_record(res: Result, detections, T_prior: Optional[np.ndarray], published: bool, stamp: float,
-               mode: str) -> dict:
+               mode: str, views: Optional[dict] = None) -> dict:
     """One image's outcome as plain data: the fix (or why none), the prior, and every
-    marker in view with what became of it."""
+    marker in view with what became of it (and `views`, from marker_views, merged in)."""
     planar = mode == 'planar'
     fix = res.fix
     rec = {'stamp': round(float(stamp), 4), 'published': bool(published), 'reason': res.reason,
@@ -71,6 +121,8 @@ def fix_record(res: Result, detections, T_prior: Optional[np.ndarray], published
             m = {'state': 'unknown'}
         else:
             m = {'state': 'unused'}
+        if views and mid in views:
+            m.update(views[mid])
         rec['markers'][str(mid)] = m
     return rec
 

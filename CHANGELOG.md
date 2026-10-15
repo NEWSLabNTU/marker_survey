@@ -82,6 +82,13 @@ browser (phase 5).
   source's header and footer comments (about its own use: routes, tape
   marks) are replaced by one line naming the source. `--keep-header`
   copies them as before.
+- Localizer node: topic `~/markers` (`diagnostic_msgs/DiagnosticArray`,
+  per image with markers, only while subscribed): per marker in view its
+  state, reprojection residual with the fix, and its position as the image
+  alone sees it from the prior (or the fix) with the offset and angle from
+  the map's pose. `~/fixes` carries the same per marker
+  (`core/check.py marker_views`). The package now depends on
+  `diagnostic_msgs`.
 - `marker_map_import` rounds the angles it converts from radians within
   the source's own precision, by at most 0.005 deg: 0.5236 rad is
   `facing_deg: 30.0`, no longer 30.00007. Its check against the source

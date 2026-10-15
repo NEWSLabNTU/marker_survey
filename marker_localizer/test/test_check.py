@@ -14,7 +14,7 @@ from marker_survey.core import marker_map as mm
 from marker_survey.core import simulate as sim
 from marker_survey.core.path_csv import load_path_csv
 
-from marker_localizer.core.check import CheckSettings, CheckStats, fix_record
+from marker_localizer.core.check import CheckSettings, CheckStats, fix_record, marker_views
 from marker_localizer.core.localize import Localizer, LocalizerSettings
 
 SITE = os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'ceiling', 'sites', 'office')
@@ -35,7 +35,8 @@ def drive(the_map):
         if not dets:
             continue
         res = loc.locate(dets, T_prior=f.T_mapmeas_base)
-        rec = fix_record(res, dets, f.T_mapmeas_base, loc.accepted(res), f.stamp, 'planar')
+        rec = fix_record(res, dets, f.T_mapmeas_base, loc.accepted(res), f.stamp, 'planar',
+                         marker_views(loc, res, dets, f.T_mapmeas_base))
         json.dumps(rec)                     # what the node publishes
         records.append(rec)
         stats.add(rec)
@@ -87,3 +88,65 @@ def test_reset_and_records_without_a_prior():
     assert s['fixes'] == 1 and s['with_prior'] == 0 and s['markers'][0]['agreement'] is None
     stats.reset()
     assert stats.summary()['fixes'] == 0
+
+
+def per_marker(records, key):
+    out = {}
+    for r in records:
+        for mid, m in r['markers'].items():
+            if key in m:
+                out.setdefault(int(mid), []).append(m[key])
+    return out
+
+
+def test_every_marker_in_view_is_checked_on_its_own(true_map, moved_map):
+    """A robot project checks each marker: its residual with the fix and where the
+    image alone puts it, from the prior pose, against the map."""
+    for records, moved in ((true_map[0], None), (moved_map[0], MOVED)):
+        off = {k: float(np.median(v)) for k, v in per_marker(records, 'offset_m').items()}
+        res = per_marker(records, 'residual_px')
+        assert len(off) == 9 and len(res) == 9
+        for mid, o in off.items():
+            if mid == moved:
+                assert 0.2 < o < 0.4, (mid, o)          # moved by 0.30 m
+            else:
+                assert o < 0.12, (mid, o)               # the prior's 3 cm noise, at 2.7 m
+        others = np.concatenate([v for k, v in res.items() if k != moved])
+        assert np.median(others) < 1.0
+        if moved is not None:          # alone in view the fix follows it; with others not
+            assert np.max(res[moved]) > 5 * np.percentile(others, 95), (res[moved], others)
+    r = next(r for r in moved_map[0] if r['markers'].get(str(MOVED), {}).get('state') == 'outlier')
+    m = r['markers'][str(MOVED)]
+    assert m['seen_from'] == 'prior' and m['residual_px'] > 2 and set(m['seen']) == {'x', 'y', 'z'}
+
+
+def test_without_a_prior_the_fix_places_the_markers():
+    truth = mm.load(os.path.join(SITE, 'marker_map.yaml'))
+    cam = sim.upward_camera()
+    loc = Localizer(truth, cam.K, cam.T_base_cam, LocalizerSettings(mode='planar'))
+    T = truth.pose_of(5).copy()                 # below marker 5
+    T[:3, :3] = np.eye(3)
+    T[2, 3] = 0.0
+    dets = sim.project(truth.poses(), truth.sizes(), cam, T @ cam.T_base_cam,
+                       np.random.default_rng(1), 0.3)
+    res = loc.locate(dets)
+    views = marker_views(loc, res, dets, None)
+    assert 5 in views
+    assert all(v['seen_from'] == 'fix' and v['offset_m'] < 0.05 for v in views.values()), views
+
+
+def test_the_checks_as_diagnostics(moved_map):
+    pytest.importorskip('diagnostic_msgs')
+    from builtin_interfaces.msg import Time
+    from diagnostic_msgs.msg import DiagnosticStatus
+    from marker_localizer.diagnostics import marker_diagnostics
+    r = next(r for r in moved_map[0] if r['markers'].get(str(MOVED), {}).get('state') == 'outlier')
+    arr = marker_diagnostics(r, Time(sec=5))
+    assert arr.header.stamp.sec == 5
+    st = {s.name: s for s in arr.status}
+    s = st[f'marker_localizer: marker {MOVED}']
+    assert s.level == DiagnosticStatus.WARN and s.message.startswith('outlier')
+    vals = {kv.key: kv.value for kv in s.values}
+    assert vals['state'] == 'outlier' and float(vals['offset_m']) > 0.2
+    assert {'residual_px', 'seen_x', 'seen_y', 'seen_z', 'seen_from', 'angle_deg'} <= set(vals)
+    assert all(x.level == DiagnosticStatus.OK for n, x in st.items() if n != s.name)

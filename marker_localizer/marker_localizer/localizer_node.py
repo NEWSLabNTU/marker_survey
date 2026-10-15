@@ -12,8 +12,13 @@
        ~/debug/image   the detections and the fit's residuals (only while something
                        subscribes)
        ~/fixes         std_msgs/String, JSON per image with markers: the fix, the prior
-                       at its stamp, the distance, each marker's use (core/check.py);
+                       at its stamp, the distance, each marker's use and check
+                       (core/check.py);
                        only while something subscribes
+       ~/markers       diagnostic_msgs/DiagnosticArray per image with markers: per
+                       marker its state, reprojection residual with the fix, and its
+                       pose as the image sees it against the map's (core/check.py
+                       marker_views, diagnostics.py); only while something subscribes
        ~/status        std_msgs/String, JSON every second: the map in use, its
                        markers, the counts; only while something subscribes
   services
@@ -35,6 +40,7 @@ import math
 import os
 import time
 
+from diagnostic_msgs.msg import DiagnosticArray
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -54,8 +60,9 @@ from marker_survey.core.detection import Detector
 from marker_survey.core.se3 import interpolate_T, make_T, matrix_to_quat, quat_to_matrix
 from marker_survey.survey_node import decode, stamp_sec, tf_to_T
 
-from marker_localizer.core.check import fix_record
+from marker_localizer.core.check import fix_record, marker_views
 from marker_localizer.core.localize import Localizer, roll_pitch_of
+from marker_localizer.diagnostics import marker_diagnostics
 from marker_localizer.params import PARAMETERS, LocalizerParams
 
 
@@ -108,6 +115,7 @@ class MarkerLocalizerNode(Node):
         self.pub_dbg = self.create_publisher(Image, '~/debug/image', 1)
         self.pub_fixes = self.create_publisher(String, '~/fixes', 50)
         self.pub_status = self.create_publisher(String, '~/status', 1)
+        self.pub_markers = self.create_publisher(DiagnosticArray, '~/markers', 10)
         self.create_service(Trigger, '~/reload', self.on_reload)
         # wall time: with use_sim_time the status must flow before a recording plays
         self.create_timer(1.0, self.publish_status, clock=Clock(clock_type=ClockType.STEADY_TIME))
@@ -305,9 +313,15 @@ class MarkerLocalizerNode(Node):
                                    throttle_duration_sec=2.0)
         if self.pub_dbg.get_subscription_count() > 0:
             self.publish_debug(msg.header, gray, dets, res, publish)
-        if dets and self.pub_fixes.get_subscription_count() > 0:
-            rec = fix_record(res, dets, T_prior, publish, t, self.p.mode)
-            self.pub_fixes.publish(String(data=json.dumps(rec)))
+        want_fixes = self.pub_fixes.get_subscription_count() > 0
+        want_markers = self.pub_markers.get_subscription_count() > 0
+        if dets and (want_fixes or want_markers):
+            rec = fix_record(res, dets, T_prior, publish, t, self.p.mode,
+                             marker_views(self.localizer, res, dets, T_prior))
+            if want_fixes:
+                self.pub_fixes.publish(String(data=json.dumps(rec)))
+            if want_markers:
+                self.pub_markers.publish(marker_diagnostics(rec, msg.header.stamp))
 
     def publish(self, stamp, fix):
         out = PoseWithCovarianceStamped()
