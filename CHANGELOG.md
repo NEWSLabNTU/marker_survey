@@ -6,6 +6,104 @@ its own `version` (now 1); the loader keeps reading older versions.
 
 ## Unreleased
 
+### A survey with the camera alone (handheld, no robot)
+
+- Survey parameter `pose_source: markers`, next to `odometry` and `tf`: no
+  odometry and no TF pose. The first frame with a marker starts the map
+  (its camera pose from the origin marker in `origin_marker` mode when it
+  is in view, else the identity); every later frame is placed by PnP on
+  all the mapped markers it sees (robust: a marker that does not fit is
+  left out; with one marker, the previous pose picks between its two
+  solutions). A frame with no mapped marker in view is skipped; new
+  markers are mapped once seen in a placed frame. The bundle adjustment
+  has no motion factor then. `core/tracking.py`.
+- `base_frame` empty (or the image's frame) with `pose_source: markers`:
+  the camera is its own base; `floor_offset` is then its height above the
+  floor.
+- Survey parameter and launch argument `vertical` (`base`, the default, as
+  before; or `ceiling`): up from the plane through the ceiling markers, for
+  a camera with no level of its own. Stored in `survey_data.npz`.
+- The survey's `~/status` gains `pose_source`, `tracking` (`ok` or `lost`:
+  no mapped marker in the last frame), `lost_since` (seconds since the last
+  placed frame, `null` while ok), `last_known_marker` (id or `null`) and
+  `unplaced` (frames not placed); the existing fields are unchanged.
+- With no motion factor and no pose prior, the relative 1-sigma (the
+  verdicts) also takes out a common tilt of the map: nothing but the
+  markers levels such a survey.
+- `examples/handheld_ceiling/`: twenty tag36h11 boards (0.40 m) on a 1.4 m
+  grid under a 2.9 m ceiling, a webcam held 1.0 m up and walked along the
+  rows and columns, with a hand's shake, a stretch past the end with no
+  marker in view, and 3 s with the camera tilted away; its survey and
+  localizer launch files, and `ci/example.sh handheld_ceiling` in CI.
+- `marker_survey_synthetic --camera handheld` (with `--hand-height`,
+  `--shake-deg`, `--tilt-at`, `--tilt-for`): such a recording, only the
+  camera's topics in it, the truth poses the camera's; `scene.json` gives
+  the stamps of the tilted stretch (`tilt_window`). `core/simulate.py`:
+  `Hand`, `walk`, `handheld_camera`, `simulate_markers`.
+
+### Survey uncertainty
+
+- Fixed: a marker whose solved rotation vector had passed pi (a ceiling
+  marker, upside down, turned past 180 degrees) got its covariance mapped
+  through the other rotation vector of the same pose, which could put its
+  angle 1-sigma at 5 degrees where it was 0.5. The solve now keeps its own
+  parameters (`Survey.joint_params`) and the covariance uses them.
+- The corner noise behind the covariance is at least the plain estimate
+  (sum of squared residuals over the degrees of freedom, outliers clipped
+  at 5 px) as well as the robust median one: keyframes that see one marker
+  only fit their corners almost exactly and pulled the median far down.
+
+### Localizer
+
+- `~/map_markers` (`visualization_msgs/MarkerArray`, latched, transient
+  local): each marker of the loaded map as a thin cube of its size and a
+  text label with its id, in the map's `frame_id`; published again when
+  the map is loaded again.
+- `~/status` gains `last_fix_age`: seconds since the stamp of the last
+  published fix, by the node's clock (`null` before the first).
+- `base_frame` empty (or the image's frame): the camera is the base, no
+  TF needed (a handheld camera).
+- Parameter and launch argument `debug_image_topic` (default
+  `~/debug/image`, as before).
+- `marker_localizer_score --gap T0 T1 [--max-first-cm X]`: no fix may
+  carry a stamp in the gap, and the first fix after it is reported with
+  its error and delay.
+
+### Launch files
+
+- `survey.launch.xml`: arguments `marker_size_sd` and `vertical`;
+  `pose_source` takes `markers`.
+- `localizer.launch.xml`: argument `debug_image_topic`.
+
+### Tools
+
+- `marker_plan`: `route_spacing_no_odom` = 2R, the spacing along a route
+  with no odometry (one marker always fully in view, two at the midpoint),
+  printed as its own line; `--handheld` (camera height 1.0 m, speed
+  0.5 m/s; explicit flags win), which also prints the zone along the
+  image's long side; `--route-length L` (and `--spacing D`) counts the
+  markers for a route, ceil(L / D) + 1 (`core/marker_plan.route_markers`).
+- New `marker_map_to_sdf`: a marker map as Gazebo models (`plane` visuals
+  of the printed sheet with its white margin, textured from the
+  dictionary's bits, PNGs written next to the SDF) at any pose (ceiling,
+  wall, floor), facing the marker's z axis; `--world` for a whole Gazebo
+  Harmonic world (ground, a ceiling plane at `--ceiling` or behind the
+  highest ceiling marker, lights from below and above, the physics,
+  sensors, scene broadcaster and user commands systems);
+  `--replace-between FILE` rewrites the lines between
+  `<!-- BEGIN ceiling markers` and `<!-- END ceiling markers -->` of an
+  existing world (`--begin`, `--end` for other lines). `core/sdf.py`.
+- `marker_survey_compare`: with the survey's report (beside the result, or
+  `--report`), each marker's verdict and its error in units of the frame's
+  1-sigma (horizontal / `frame_sd_xy_cm`, height / `frame_sd_z_cm`), with
+  their median and maximum; `--require-good` fails unless every marker is
+  good.
+
+### Docs
+
+- `docs/integration.md`: "A handheld survey, no robot"; with a measured
+  marker size, `marker_size_sd` can be set lower.
+
 ### Web interface: no robot, a handheld webcam
 
 - Plan tab (`#plan`, also without ROS): ceiling and camera heights with

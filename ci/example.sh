@@ -8,12 +8,13 @@
 #
 #   ci/example.sh wall_course [OUT_DIR]
 #   ci/example.sh ceiling [OUT_DIR]
+#   ci/example.sh handheld_ceiling [OUT_DIR]
 #
 # Exits non-zero when the survey or the localizer misses its limits.
 set -eo pipefail
 source "$(dirname "$0")/lib.sh"
 set -m      # every background job in its own process group: stop() reaches launch and its nodes
-example=${1:?example name: wall_course or ceiling}
+example=${1:?example name: wall_course, ceiling or handheld_ceiling}
 mkdir -p "${2:-tmp/ci}"
 out=$(cd "${2:-tmp/ci}" && pwd)/example_$example
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-39}
@@ -44,6 +45,29 @@ case $example in
                prior_topic:=/prior_pose prior_type:=pose)
     localizer_limits=(--mode planar --max-mean-cm 1.0 --max-cm 3.0)
     ;;
+  handheld_ceiling)
+    # a person walking with the camera held up: no odometry, no TF; tilted away from
+    # the ceiling for 3 s halfway along the middle column (a kidnap), and past the west
+    # end where no marker is in view
+    site=$ex/sites/office
+    record=(--camera handheld --open --rate 5 --speed 0.5 --origin 0 --tilt-at 67)
+    survey=(image_topic:=/camera/image camera_info_topic:=/camera/camera_info)
+    truth=truth_origin.yaml
+    # every marker good; median 1 cm, max 2 cm: half the robot's ceiling example's limit
+    # (median 2 cm, against a reference track with 5 cm noise), since nothing but the
+    # rendered corners limits the camera alone here (0.2 cm median, 0.3 cm max measured)
+    survey_limits=(--max-median-cm ${HANDHELD_MEDIAN_CM:-1.0} --max-cm ${HANDHELD_MAX_CM:-2.0}
+                   --require-good)
+    # the origin marker's frame is the site map's (marker 0 at its origin, rotation 0):
+    # localize on the map just surveyed, score against the true camera poses
+    localize_map=$out/survey/marker_map.yaml
+    localizer=(image_topic:=/camera/image camera_info_topic:=/camera/camera_info)
+    # 3d, no prior: mean 1 cm as the ceiling example's planar fixes; max 6 cm for the
+    # frames at the edges of the tilted stretch, which see markers at a slant (0.4 cm
+    # mean, 4.6 cm max measured); the first fix after the stretch within 2 cm
+    localizer_limits=(--mode 3d --max-mean-cm ${HANDHELD_LOC_MEAN_CM:-1.0}
+                      --max-cm ${HANDHELD_LOC_MAX_CM:-6.0} --max-first-cm 2.0)
+    ;;
   *)
     echo "unknown example $example"; exit 2;;
 esac
@@ -73,6 +97,21 @@ grep -E 'solved|aligned|keyframes,' "$out/survey.log" | tail -3 || true
 ros2 run marker_survey marker_survey_compare "$out/survey/marker_map.yaml" "$out/sim/$truth" \
   "${survey_limits[@]}"
 ros2 run marker_survey marker_map_check "$out/survey/marker_map.yaml" > /dev/null
+if [ "$example" = handheld_ceiling ]; then
+  # frames the camera alone could not place: the tilted stretch and the west end
+  grep -E 'not placed' "$out/survey.log" | tail -1 || { echo "FAIL: no frame was left unplaced"; exit 1; }
+  # the tilted stretch: no fix inside it, the first one after it in the right place
+  gap=($(python3 -c "import json; print(*json.load(open('$out/sim/scene.json'))['tilt_window'])"))
+  localizer_limits+=(--gap "${gap[@]}")
+  echo "== a Gazebo world from the surveyed map"
+  ros2 run marker_survey marker_map_to_sdf "$out/survey/marker_map.yaml" "$out/world/site.world" --world
+  if command -v gz > /dev/null && gz sdf --help > /dev/null 2>&1; then
+    gz sdf -k "$out/world/site.world"
+  else
+    python3 -c "import xml.etree.ElementTree as E, sys; E.parse(sys.argv[1]); print('parses (no gz sdf here)')" \
+      "$out/world/site.world"
+  fi
+fi
 
 echo "== localizer: $ex/launch/localizer.launch.xml on $localize_map"
 ros2 launch $ex/launch/localizer.launch.xml marker_map:=$localize_map \

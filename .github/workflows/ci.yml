@@ -141,7 +141,7 @@ jobs:
       fail-fast: false
       matrix:
         distro: [humble, jazzy]
-        example: [wall_course, ceiling]
+        example: [wall_course, ceiling, handheld_ceiling]
     runs-on: ubuntu-24.04
     container: ros:${{ matrix.distro }}
     defaults:
@@ -154,6 +154,10 @@ jobs:
           apt-get update
           rosdep update --rosdistro ${{ matrix.distro }}
           rosdep install --from-paths . --ignore-src -y --rosdistro ${{ matrix.distro }}
+      - name: Gazebo's SDF checker (Jazzy, Gazebo Harmonic), for the world generated from the map
+        if: matrix.example == 'handheld_ceiling' && matrix.distro == 'jazzy'
+        run: |
+          apt-get install -y --no-install-recommends ros-jazzy-sdformat-vendor ros-jazzy-gz-tools-vendor
       - name: Build
         run: |
           source /opt/ros/${{ matrix.distro }}/setup.bash
@@ -169,6 +173,8 @@ jobs:
           path: |
             ci_out/*/survey/
             ci_out/*/sim/truth_*.yaml
+            ci_out/*/sim/scene.json
+            ci_out/*/world/
             ci_out/*/*.log
 
   timing:

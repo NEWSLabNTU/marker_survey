@@ -1,0 +1,24 @@
+# A walk through the office with the camera held up, as a robot would drive:
+# from under the origin marker along every row of markers, then along every
+# column (each marker seen along two lines, which fixes its height and tilt),
+# out past the west end where no marker is in view, and back along the
+# middle row. x [m], y [m]
+0.0,0.0
+-2.8,0.0
+-2.8,-1.4
+2.8,-1.4
+2.8,1.4
+-2.8,1.4
+-2.8,2.8
+2.8,2.8
+1.4,2.8
+1.4,-1.4
+0.0,-1.4
+0.0,2.8
+-1.4,2.8
+-1.4,-1.4
+-2.8,-1.4
+-2.8,2.8
+-4.6,2.8
+-4.6,0.0
+2.8,0.0

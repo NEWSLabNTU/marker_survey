@@ -18,6 +18,12 @@ Both share the detection, the survey (a bundle adjustment of every marker
 and camera pose), the marker map file and the localizer core. A robot adds
 only its launch file and the remapping into its own state estimator.
 
+No robot yet? A person can survey ceiling markers with a webcam held up
+while walking the routes (`pose_source: markers`: the camera alone, every
+frame placed on the markers already mapped), localize handheld on the map,
+and turn the map into a Gazebo world for a simulated robot
+(`examples/handheld_ceiling/`, [docs/integration.md](docs/integration.md#a-handheld-survey-no-robot)).
+
 Status: phases 0 to 3 of [ROADMAP.md](ROADMAP.md) are done: the survey for
 wall boards and ceiling markers, in three frame modes, the marker map file,
 the localizer in both modes, the tools and CI. Of phase 4, the integration
@@ -109,7 +115,8 @@ course and a ceiling, through their own launch files the same way.
      uncertainty, `marker_size_sd` (0.5 % by default: a size off by that
      moves a ceiling marker 3 m up by about 1.4 cm in height, and stretches
      a long site; not in the relative values, since driving again does not
-     improve it). The corner noise behind both is measured from the solve
+     improve it; with the printed black square measured with a ruler, set
+     it lower, `marker_size_sd:=0.002`). The corner noise behind both is measured from the solve
      (`solve.pixel_noise_px`), not assumed;
    - `survey_data.npz`: the recording, to solve again without the robot:
      `ros2 run marker_survey marker_survey_solve my_site/survey_data.npz --output-dir my_site`.
@@ -126,7 +133,8 @@ camera_info (the corners are then undistorted).
 | `align_to_track` | survey in the odometry frame, then a rigid fit (Umeyama, no scale) of the solved trajectory to a reference trajectory at the same stamps: TF `frame.reference_frame -> base_frame`, the localizer's poses | the same, without the localizer's jumps inside the solve |
 
 The floor normal (z up) comes from the `base_frame` poses in every mode, so
-an upward camera needs nothing special; `floor_offset` moves the floor below
+an upward camera needs nothing special (with `vertical: ceiling`, from the
+plane through the ceiling markers instead: a handheld camera has no level); `floor_offset` moves the floor below
 `base_frame` (a vehicle on a stand). In `align_to_track` the report gives
 the fit's residual (`frame.fit_rms_m`, `fit_max_m`): about the localizer's
 own noise when all is well. A localizer's error holds over metres, so the
@@ -143,6 +151,12 @@ An error that holds over the whole drive does not average out.
   factor weighted by `odom_drift` (translation error per metre).
 - `pose_source: tf`: TF `pose_frame -> camera optical frame`, any frame,
   any camera direction.
+- `pose_source: markers`: the camera alone. The first frame starts the map
+  (in the origin marker's frame when it is in view), every later frame is
+  placed by PnP on the mapped markers it sees, and a frame with none is
+  skipped (`~/status`: `tracking: lost`, `lost_since`, `last_known_marker`).
+  No motion factor in the solve. `base_frame` empty: the camera is the
+  base (handheld), `floor_offset` its height.
 
 ### Detection
 
@@ -244,6 +258,10 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/my_site/marke
   enabled false`); `~/debug/image` shows the markers used (green, the map's
   corners projected with the fix as dots, the residual written), left out
   (orange: outlier, far) or unusable (red), and the fix.
+- `~/map_markers` (latched) shows the loaded map in RViz; `~/status` gives
+  `last_fix_age`; `base_frame` empty publishes the camera's own pose (a
+  handheld camera, `3d`, no prior); `debug_image_topic` moves the debug
+  image.
 - `detect_scale: 0.5` finds markers in a half-size image and refines their
   corners on the full one (a 1920 x 1200 camera); the node logs its
   detection and fit times every 10 s.
@@ -372,10 +390,11 @@ Each runs as `ros2 run marker_survey <command>` (the last three as
 | `marker_survey` (node) | the survey |
 | `marker_survey_solve` | solve a recording again, other frame or settings |
 | `marker_survey_synthetic` | render a recording from a marker map and a route CSV |
-| `marker_survey_compare` | a surveyed map against the truth or a tape survey |
+| `marker_survey_compare` | a surveyed map against the truth or a tape survey; with the report, error over the frame's 1-sigma |
 | `marker_map_check` | validate a map, draw it from above |
 | `marker_map_import` | convert an older site file into `marker_map.yaml` |
-| `marker_plan` | ceiling marker size and spacing from the ceiling height and camera |
+| `marker_plan` | ceiling marker size and spacing from the ceiling height and camera; `--handheld`, `--route-length` |
+| `marker_map_to_sdf` | a marker map as Gazebo models, or a Gazebo Harmonic world (`--world`), or into a world's marked block (`--replace-between`) |
 | `marker_localizer` (node) | the localizer |
 | `marker_localizer_evaluate` | both modes and the source methods on a rendered or corner-level scene, no ROS |
 | `marker_localizer_score` | a recording of the localizer's fixes against the truth |
@@ -396,6 +415,7 @@ marker position error in 3D; the same numbers on Humble and Jazzy):
 | 9 ceiling tags of 0.45 m at 3 m, office routes (2 laps, 92 m), upward camera 640 x 480 at 70 deg, map pose noise 6 cm per axis and 1 deg | `pose_frame` | median under 4 cm | median 0.7 cm, max 1.0 cm |
 | the same | `align_to_track` | median under 2 cm | median 0.6 cm, max 1.2 cm |
 | uneven ceiling (2.8 to 3.4 m), tags tilted 6 and 4 deg | `align_to_track` | heights within 2 cm, tilts within 1 deg | heights within 0.7 cm, tilts within 0.12 deg |
+| 20 ceiling tags of 0.40 m at 2.9 m on a 1.4 m grid, a webcam 640 x 480 at 70 deg held 1.0 m up and walked (60 m, hand shake, 3 s tilted away), no odometry (`ci/example.sh handheld_ceiling`) | `origin_marker`, `pose_source: markers` | all good, median 1 cm, max 2 cm | all good, median 0.20 cm, max 0.24 cm |
 
 Corner-level simulations of the same scenes run as unit tests
 (`test/test_scenes.py`).
@@ -410,6 +430,7 @@ The localizer, base position error against the truth, mean / max
 | the same, two tags in view | `planar` against `3d` | planar within 2 cm, 3d worse | 0.37 cm against 7.3 cm max | 0.03 cm against 0.46 cm max (rendered offline) |
 | the test course, 11 wall boards, one lap | `3d` | no worse than the source's method | 5.4 / 38.6 cm (source method 33.5 / 102 cm) | 0.90 / 7.8 cm (source method, same frames offline: 5.5 / 97 cm) |
 | the office with marker 5 moved 1.5 m | `planar` | rejected by the gate | every fix from it alone rejected | 92 gated, max 0.13 cm |
+| the handheld walk above, on the surveyed map, no prior | `3d` (camera pose) | mean 1 cm, max 6 cm; no fix while tilted away, the first after it within 2 cm | | 0.37 / 4.6 cm; none; 0.11 cm |
 
 Per frame on one arm64 server core (CI): 640 x 480 grey, 1.8 ms detection
 and 2.0 ms planar fit (6 % of the core at 15 Hz); 1920 x 1200 colour, 39 ms
@@ -424,6 +445,7 @@ colcon test && colcon test-result --verbose
 ci/synthetic_survey.sh wall          # in a sourced workspace
 ci/synthetic_localize.sh ceiling     # the localizer through its node
 ci/example.sh ceiling                # an example's launch files, survey then localizer
+ci/example.sh handheld_ceiling       # the camera alone, handheld
 ci/localizer_comparison.sh wall      # against the source methods, no ROS
 ci/timing.sh                         # detection and fit per frame, one core
 python3 ci/check_words.py --commits  # neutral wording
@@ -431,8 +453,8 @@ python3 ci/check_words.py --commits  # neutral wording
 
 CI (GitHub Actions) builds and tests on `ros:humble` and `ros:jazzy`, runs
 the four rendered surveys and the three rendered localizer recordings
-through their nodes, the two examples through their launch files (installed
-with rosdep), compares the localizer with the source methods, times
+through their nodes, the three examples through their launch files (installed
+with rosdep; the handheld one also checks its Gazebo world with `gz sdf` on Jazzy), compares the localizer with the source methods, times
 it on an x86 and an arm64 runner, and checks the wording.
 
 ## Licence

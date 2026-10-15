@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!--
+  Ceiling markers, handheld: survey with the camera alone. A person holds a
+  laptop with a USB webcam pointing up at the ceiling markers and walks the
+  route a robot would drive. No robot, no odometry, no TF: every frame is
+  placed on the markers already mapped (pose_source markers), so start under
+  the origin marker and keep a mapped marker in view; a frame without one is
+  skipped (the status says lost) until a mapped marker comes back into view.
+  The camera driver runs beside it, for example:
+
+    ros2 run usb_cam usb_cam_node_exe   (or v4l2_camera), calibrated
+    ros2 launch examples/handheld_ceiling/launch/survey.launch.xml output_dir:=$PWD/sites/my_site
+
+  The result is in the frame of the origin marker: origin on the floor below
+  it, x along its image x axis, z up opposite the ceiling markers' normal
+  (vertical ceiling), the floor camera_height below the camera's mean height.
+
+  The simulated recording of examples/handheld_ceiling/README.md plays into
+  this file with image_topic:=/camera/image camera_info_topic:=/camera/camera_info
+  use_sim_time:=true process_all:=true.
+-->
+<launch>
+  <arg name="output_dir" description="where marker_map.yaml, survey_report.yaml and survey_data.npz are written"/>
+  <arg name="origin_marker" default="0" description="the marker that defines the frame; start under it"/>
+  <arg name="frame_id" default="map" description="the frame name written to the map"/>
+  <arg name="dictionary" default="tag36h11"/>
+  <arg name="marker_size" default="0.40" description="[m] edge of the black square, measured"/>
+  <arg name="marker_size_sd" default="0.005" description="relative sd of the size; lower (0.002) when every board was measured"/>
+  <arg name="camera_height" default="1.0" description="[m] the camera above the floor while walking"/>
+  <arg name="image_topic" default="/image_raw"/>
+  <arg name="camera_info_topic" default="/camera_info"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="process_all" default="false" description="true for a recording: every frame, in order"/>
+  <arg name="start_paused" default="false" description="true: record only once the web interface starts the survey"/>
+
+  <include file="$(find-pkg-share marker_survey)/launch/survey.launch.xml">
+    <arg name="output_dir" value="$(var output_dir)"/>
+    <arg name="dictionary" value="$(var dictionary)"/>
+    <arg name="marker_size" value="$(var marker_size)"/>
+    <arg name="marker_size_sd" value="$(var marker_size_sd)"/>
+    <arg name="frame_mode" value="origin_marker"/>
+    <arg name="origin_marker" value="$(var origin_marker)"/>
+    <arg name="frame_id" value="$(var frame_id)"/>
+    <arg name="pose_source" value="markers"/>
+    <arg name="base_frame" value=""/>
+    <arg name="vertical" value="ceiling"/>
+    <arg name="floor_offset" value="$(var camera_height)"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="process_all" value="$(var process_all)"/>
+    <arg name="start_paused" value="$(var start_paused)"/>
+  </include>
+</launch>

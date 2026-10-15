@@ -3,8 +3,9 @@
 A robot project runs the survey and the localizer from this repository with
 nothing but its own launch file, its camera remappings and its state
 estimator's configuration. This guide lists what the robot provides, the
-frames, every parameter of the two nodes, how to check a setup, and the two
-examples, which run on a simulated recording without a robot.
+frames, every parameter of the two nodes, how to check a setup, a survey
+with the camera alone (handheld, no robot), and the examples, which run on a
+simulated recording without a robot.
 
 ## What a robot project provides
 
@@ -66,7 +67,7 @@ ros2 launch marker_survey survey.launch.xml output_dir:=$PWD/sites/my_site \
 | TF (in) | image frame -> `base_frame`; `pose_source: tf`: `pose_frame` -> image frame at the image's stamp; `align_to_track`: `frame.reference_frame` -> `base_frame` at the image's stamp; odometry: its `child_frame_id` -> image frame | |
 | `~/markers` (out) | `visualization_msgs/MarkerArray` | the markers so far, for RViz |
 | `~/debug/image` (out) | `sensor_msgs/Image` | detections drawn: green known, yellow new, red not used; only while subscribed |
-| `~/status` (out) | `std_msgs/String` | JSON twice a second, only while subscribed: state, keyframes, every marker with its live position, a light (`good`, `pass again`, after a save the report's verdict) and a hint, the last frame's detections, the path; for the web interface |
+| `~/status` (out) | `std_msgs/String` | JSON twice a second, only while subscribed: state, keyframes, every marker with its live position, a light (`good`, `pass again`, after a save the report's verdict) and a hint, the last frame's detections, the path; `pose_source`; `tracking` (`ok`, or `lost`: with `pose_source: markers`, no mapped marker in the last frame, so it was not placed and new markers in it cannot be linked; the other sources are always `ok`), `lost_since` ([s] since the last placed frame, `null` while `ok`), `last_known_marker` (the largest mapped marker in the last placed frame, or `null`), `unplaced` (frames not placed); for the web interface |
 | `~/save` (service) | `std_srvs/Trigger` | solve and write now; Ctrl-C does the same (`save_on_exit`) |
 | `~/start`, `~/pause` (services) | `std_srvs/Trigger` | record, or stop recording and keep what was recorded; after a save, new keyframes add to the same recording ("pass again") |
 | `~/reset` (service) | `std_srvs/Trigger` | drop the recording and start afresh; the files stay |
@@ -91,19 +92,20 @@ the ones marked with an argument of the same name, `frame.mode` as
 | `dictionary` | `DICT_5X5_1000` | yes | the printed family: an OpenCV `DICT_*` name or `tag16h5`, `tag25h9`, `tag36h10`, `tag36h11`, `aruco_mip_36h12`, `aruco_original` |
 | `marker_size` | 0.38 | yes | [m] edge of the black square, not the sheet; a wrong size scales every distance |
 | `marker_sizes` | `['']` | | per-marker sizes, `["12:0.30", "13:0.30"]` |
-| `marker_size_sd` | 0.005 | | relative 1-sigma of the size, common to all markers (a printer's scale, the tape): 0.005 is 0.5 %, 2 mm on 0.45 m; in the report's `frame_sd_*` only; 0: exact. `marker_survey_solve --marker-size-sd` sets it again |
+| `marker_size_sd` | 0.005 | yes | relative 1-sigma of the size, common to all markers (a printer's scale, the tape): 0.005 is 0.5 %, 2 mm on 0.45 m; in the report's `frame_sd_*` only; 0: exact. `marker_survey_solve --marker-size-sd` sets it again. With the black square of the printed sheets measured with a ruler (to a millimetre: 0.002 on 0.45 m), set it lower: at 0.005 it is what dominates the height 1-sigma of a ceiling marker when the size is right |
 | `image_topic` | `/camera/image` | yes | |
 | `camera_info_topic` | `/camera/camera_info` | yes | |
 | `compressed` | false | yes | subscribe to `image_topic/compressed` |
-| `pose_source` | `odometry` | yes | `odometry` (the `odom_topic`) or `tf` (`pose_frame`) |
+| `pose_source` | `odometry` | yes | `odometry` (the `odom_topic`), `tf` (`pose_frame`), or `markers`: the camera alone, each frame placed on the markers already mapped (below, "A handheld survey, no robot") |
 | `odom_topic` | `/odom` | yes | |
 | `pose_frame` | `''` | yes | `pose_source: tf`: the frame of the camera poses (`odom`, `map`, ...) |
-| `base_frame` | `base_link` | yes | the robot frame; the floor is below it |
+| `base_frame` | `base_link` | yes | the robot frame; the floor is below it. `pose_source: markers`: empty (or the image's frame) when the camera is its own base, a handheld camera |
 | `frame.mode` | `origin_marker` | `frame_mode` | `origin_marker`, `pose_frame` or `align_to_track` (README, "Frame modes") |
 | `frame.origin_marker` | -1 | `origin_marker` | `origin_marker`: the marker that defines the frame |
 | `frame.frame_id` | `map` | `frame_id` | `origin_marker`: the `frame_id` written to the file |
 | `frame.reference_frame` | `''` | `reference_frame` | `align_to_track`: TF frame of the reference trajectory; also the result's `frame_id` |
-| `floor_offset` | 0.0 | yes | [m] how far the floor lies below `base_frame` |
+| `floor_offset` | 0.0 | yes | [m] how far the floor lies below `base_frame`; a handheld camera: its height above the floor |
+| `vertical` | `base` | yes | where up is for the floor and the `origin_marker` frame: `base`, the mean z axis of `base_frame`; `ceiling`, the normal of the plane through the ceiling markers (they must all face one way), for a camera that has no level of its own (handheld) |
 | `rate` | 5.0 | | [Hz] how often queued frames are processed |
 | `process_all` | false | yes | every frame in order over a reliable subscription (recordings); live, only the newest frame |
 | `pose_tolerance` | 0.1 | | [s] an image before the first or after the last odometry message takes the nearest one within this |
@@ -131,15 +133,16 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/sites/my_site
 | Topic | Type | |
 |---|---|---|
 | `image_topic`, `camera_info_topic` (in) | as the survey | |
-| TF (in) | `base_frame` -> image frame (the mounting, looked up once); `roll_pitch: tf`: `roll_pitch_frame` -> `base_frame` at the image's stamp | |
+| TF (in) | `base_frame` -> image frame (the mounting, looked up once; none with `base_frame` empty or the image's frame: the camera is the base); `roll_pitch: tf`: `roll_pitch_frame` -> `base_frame` at the image's stamp | |
 | `prior_topic` (in, optional) | `geometry_msgs/PoseWithCovarianceStamped`, or `nav_msgs/Odometry` with `prior_type: odometry` | the estimator's pose in the map's `frame_id`, for the gate; best effort, reliable with `process_all` |
 | `imu_topic` (in, `roll_pitch: imu`) | `sensor_msgs/Imu` | its orientation gives roll and pitch |
 | `pose_topic` (out, default `~/pose`, so `/marker_localizer/pose`) | `geometry_msgs/PoseWithCovarianceStamped` | `base_frame` in the map's `frame_id`, stamped with the image's capture time |
-| `~/debug/image` (out) | `sensor_msgs/Image` | markers used (green, map corners projected with the fix as dots, residual written), left out (orange), unusable (red), not in the map (grey), and the fix; only while subscribed |
+| `debug_image_topic` (out, default `~/debug/image`) | `sensor_msgs/Image` | markers used (green, map corners projected with the fix as dots, residual written), left out (orange), unusable (red), not in the map (grey), and the fix; only while subscribed |
 | `~/fixes` (out) | `std_msgs/String` | JSON per image with markers, only while subscribed: the fix (or why none), the prior at its stamp, the distance between them, and per marker in view what became of it and its check (below) (`marker_localizer/core/check.py`) |
 | `~/markers` (out) | `diagnostic_msgs/DiagnosticArray` | per image with markers, only while subscribed: one status per marker in view, `marker_localizer: marker <id>`, level WARN when left out as an outlier, else OK; values below |
 | `rejected_topic` (out, only if set) | `geometry_msgs/PoseWithCovarianceStamped` | the fixes the gate turned down, for relocalization; never fused by the estimator |
-| `~/status` (out) | `std_msgs/String` | JSON every second, only while subscribed: the map file in use, its markers, the counts |
+| `~/status` (out) | `std_msgs/String` | JSON every second, only while subscribed: the map file in use, its markers, the counts, `last_fix_age` ([s] since the stamp of the last published fix, by the node's clock; `null` before the first: "no marker in view for N s") |
+| `~/map_markers` (out) | `visualization_msgs/MarkerArray` | latched (transient local): every marker of the loaded map as a thin cube of its size at its pose, and a text label with its id, in the map's `frame_id`; published again when the map is loaded again (`~/reload`, a new `marker_map`) |
 | `~/reload` (service) | `std_srvs/Trigger` | read the map file again; a file that does not load is refused and the old map stays |
 
 Per-marker checks, in `~/fixes` (per marker) and `~/markers` (as key-value
@@ -182,7 +185,7 @@ file instead of starting the node itself; `survey.launch.xml` takes
 |---|---|---|---|
 | `marker_map` | (required) | yes | the site's `marker_map.yaml`; its `dictionary`, sizes and `frame_id` are used; settable at run time |
 | `mode` | `planar` | yes | `planar` (x, y, yaw on a flat floor) or `3d` (6-DoF) |
-| `base_frame` | `base_link` | yes | the frame whose pose is published |
+| `base_frame` | `base_link` | yes | the frame whose pose is published; empty (or the image's frame): the camera's own, a handheld camera |
 | `image_topic` | `/camera/image` | yes | |
 | `camera_info_topic` | `/camera/camera_info` | yes | |
 | `compressed` | false | yes | subscribe to `image_topic/compressed` |
@@ -216,6 +219,7 @@ file instead of starting the node itself; `survey.launch.xml` takes
 | `tilt_sd_deg` | 0.2 | | `planar`: the robot's roll and pitch uncertainty, added to x and y at the markers' distance |
 | `base_height` | 0.0 | | `planar`: [m] `base_frame`'s height above the map's z = 0, the published z |
 | `debug_width` | 960 | | [px] width of `~/debug/image` |
+| `debug_image_topic` | `~/debug/image` | yes | the topic of the debug image, so an including launch file need not remap `/<node_name>/debug/image` |
 
 ## Wiring the localizer into the state estimator
 
@@ -266,6 +270,104 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=... \
 Another estimator takes the same message; it should use the covariance
 as published and ignore the entries with variance 1000 in planar mode.
 
+## A handheld survey, no robot
+
+The markers can be surveyed before any robot is on site: a person holds a
+laptop with a USB webcam pointing up at the ceiling markers and walks the
+routes a robot will drive. There is no odometry and no TF: with
+`pose_source: markers` every frame is placed on the markers already mapped
+(PnP on all of them in view), and a frame with no mapped marker in view is
+skipped. The same person can then run the localizer handheld, and a
+simulated robot can drive in a Gazebo world made from the surveyed map.
+
+**Plan the markers.** For a 2.9 m ceiling and a 640 x 480 webcam with a
+70 degree lens held 1.0 m up:
+
+```
+$ ros2 run marker_survey marker_plan --ceiling 2.9 --hfov 70 --handheld --size 0.40 --route-length 30
+...
+  whole marker in view while the camera is within R = 0.69 m of it
+spacing, a marker always in view (square grid): D <= 0.98 m
+spacing along a route, odometry in between:      D <= 2.39 m (2R + 1.00 m without a marker at 5 % drift)
+spacing along a route, no odometry (handheld):   D <= 1.39 m (2R: one marker always fully in view, two at the midpoint)
+  hold the image's long side along the walk: there R = 1.03 m, so two markers 1.39 m apart stay in view together over 0.67 m
+...
+route of 30.0 m at D = 1.39 m: 23 markers (ceil(L / D) + 1)
+```
+
+Without odometry a new marker is linked to the map only in a frame that
+also sees a mapped one, so along a route two markers must be in view
+together: D <= 2R. At 2R that happens at the midpoint only, which a hand's
+shake breaks; holding the laptop so that the image's long side runs along
+the walk widens the zone along the way (1.03 m here) and leaves a margin.
+
+**The camera.** A calibrated camera driver (`usb_cam`, `v4l2_camera`,
+calibrated with `camera_calibration`): a rectified image, or a raw one
+with its distortion in `camera_info`. Its frame is the base:
+
+```bash
+ros2 launch examples/handheld_ceiling/launch/survey.launch.xml output_dir:=$PWD/sites/my_site \
+    image_topic:=/image_raw camera_info_topic:=/camera_info camera_height:=1.0
+```
+
+That launch file sets `pose_source: markers`, `base_frame` empty (the
+camera is the base), `frame_mode: origin_marker` with `origin_marker` 0,
+`vertical: ceiling` (up is the normal of the plane through the ceiling
+markers: a hand is not level) and `floor_offset` to the camera's height,
+so the floor lies that far below the camera's mean height.
+
+**Walk.** Start under the origin marker: the first frame places the map in
+its frame. Walk along every row of markers and then along every column,
+slowly (0.5 m/s), so that each marker is seen along two lines (its height
+and tilt), and keep a mapped marker in view. When none is, the frame is
+not placed: the log says so and names the unmapped markers in view, and
+the status says `tracking: lost`, `lost_since` (seconds) and
+`last_known_marker`; walk back towards that marker until the tracking is
+`ok` again. A marker seen only while lost stays unmapped. Save as with a
+robot (Ctrl-C or `~/save`); the report's verdicts and `frame_sd_*` hold as
+for any survey. Taking the level from the ceiling markers' plane assumes a
+level ceiling; on an uneven one (steps, bulkheads), `vertical: base` with
+a `base_frame` that is level (a TF from a level frame) is the way.
+
+**Localize, handheld.** The localizer in `3d` mode, no prior (a hand is
+not level and nothing estimates the pose), `base_frame` empty, so the
+published pose is the camera's:
+
+```bash
+ros2 launch examples/handheld_ceiling/launch/localizer.launch.xml marker_map:=$PWD/sites/my_site/marker_map.yaml \
+    image_topic:=/image_raw camera_info_topic:=/camera_info
+```
+
+Every frame with a mapped marker gives a fix of its own; a frame without
+one gives none, and `~/status` says for how long (`last_fix_age`). With no
+prior there is no gate, so a fix after the camera looked away lands at
+once where the camera is. `~/map_markers` shows the map in RViz (fixed
+frame `map`) beside the fixes on `~/pose`.
+
+**A simulated robot.** `marker_map_to_sdf` turns the surveyed map into
+Gazebo models (each marker a sheet with its white margin, at its pose,
+facing the way it faces) or a whole Gazebo Harmonic world:
+
+```bash
+ros2 run marker_survey marker_map_to_sdf sites/my_site/marker_map.yaml sim/office.world --world
+gz sim sim/office.world
+ros2 run marker_survey marker_map_to_sdf sites/my_site/marker_map.yaml --replace-between my_robot/worlds/office.world
+```
+
+The world has a ground plane, a ceiling plane just behind the highest
+ceiling marker (or at `--ceiling H`), light from below for the markers
+facing down, and the physics, sensors (ogre2), scene broadcaster and user
+commands systems. `--replace-between` rewrites only the lines between
+`<!-- BEGIN ceiling markers` and `<!-- END ceiling markers -->` of a
+robot's own world. The textures (`marker_<id>.png`) are written next to
+the SDF and named in it by relative paths, which Gazebo resolves against
+the SDF's directory: keep them together. A robot's upward camera in that
+world sees the markers where the map has them (checked with a rendered
+camera 1 m below the ceiling: the localizer placed it within 2 mm).
+
+`examples/handheld_ceiling/` is this setup on a simulated recording; its
+README gives the numbers.
+
 ## Checking a setup
 
 1. **The map file.** `ros2 run marker_survey marker_map_check sites/my_site/marker_map.yaml --png top.png`
@@ -293,7 +395,10 @@ as published and ignore the entries with variance 1000 in planar mode.
    mode it grows with the distance from the origin marker, and passing the
    origin marker from more places, or choosing one in the middle of the
    site, shrinks it. It holds the marker size's uncertainty
-   (`marker_size_sd`): heights all off by the same centimetre or two mean a
+   (`marker_size_sd`, 0.5 % by default; with the black square of the
+   printed sheets measured with a ruler, set it lower, `marker_size_sd:=0.002`
+   for a millimetre on 0.45 m, or the default dominates the height 1-sigma
+   of a ceiling marker): heights all off by the same centimetre or two mean a
    size measured wrong, and measuring the black square again and solving
    the recording again with it (`marker_survey_solve survey_data.npz
    --marker-size M --output-dir ...`) fixes them. `marker_survey_compare` compares the map with a tape survey of a
@@ -431,6 +536,7 @@ step directly (`/#plan`, `/#survey`, `/#check`, `/#localize`, `/#use`;
 |---|---|---|---|
 | `examples/wall_course/` | wall boards (`DICT_5X5_1000`, 0.38 m) around a 10 x 4 m course; a vehicle's forward camera with visual-inertial odometry | `origin_marker` (board 10), odometry pose source | `3d`, gated against a `PoseWithCovarianceStamped` |
 | `examples/ceiling/` | ceiling markers (tag36h11, 0.45 m at 3 m) in an office; an indoor robot's upward webcam, wheel odometry, a LiDAR localizer | `align_to_track` against the LiDAR localizer's `map -> base_link`, TF pose source | `planar`, gated against robot_localization's `Odometry` |
+| `examples/handheld_ceiling/` | ceiling markers (tag36h11, 0.40 m at 2.9 m, a 1.4 m grid); a webcam held 1.0 m up by a person walking, no robot | `origin_marker` (marker 0), `pose_source: markers`, `vertical: ceiling` | `3d`, the camera's pose, no prior |
 
 Each holds `launch/survey.launch.xml`, `launch/localizer.launch.xml` (the
 ceiling example also `launch/web.launch.xml`, which starts both with the web interface) and
@@ -551,10 +657,23 @@ The recording's prior is a `PoseWithCovarianceStamped`, hence
 `prior_type:=pose`; on the robot it is robot_localization's `Odometry`
 (the launch file's default).
 
+### Ceiling markers, handheld
+
+`examples/handheld_ceiling/README.md` gives the steps; the recording holds
+only the camera's topics:
+
+```bash
+out=/tmp/handheld
+ros2 run marker_survey marker_survey_synthetic $out/sim \
+    --map examples/handheld_ceiling/sites/office/marker_map.yaml \
+    --route examples/handheld_ceiling/sites/office/route.csv \
+    --camera handheld --open --rate 5 --speed 0.5 --origin 0 --tilt-at 67
+```
+
 ### In one go
 
-`ci/example.sh wall_course` and `ci/example.sh ceiling` run exactly these
-steps and fail when the survey or the localizer misses its limits; CI runs
-both on Humble and Jazzy after installing the dependencies with rosdep, as
-above. Results are in
+`ci/example.sh wall_course`, `ci/example.sh ceiling` and
+`ci/example.sh handheld_ceiling` run exactly these steps and fail when the
+survey or the localizer misses its limits; CI runs them on Humble and
+Jazzy after installing the dependencies with rosdep, as above. Results are in
 [phase-4-adoption.md](roadmap/phase-4-adoption.md#result).

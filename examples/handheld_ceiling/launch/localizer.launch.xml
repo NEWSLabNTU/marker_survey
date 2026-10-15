@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!--
+  Ceiling markers, handheld: the localizer on the surveyed map, the camera
+  alone. 3d mode (a hand is not level: roll and pitch are fitted), no prior
+  pose, so every frame with a marker of the map in view gives a fix on its
+  own, and a frame without one gives none (~/status: last_fix_age). The pose
+  published is the camera's (base_frame empty: the camera is the base), in the
+  map's frame; ~/map_markers shows the map in RViz.
+
+    ros2 launch examples/handheld_ceiling/launch/localizer.launch.xml marker_map:=$PWD/sites/my_site/marker_map.yaml
+
+  The simulated recording of examples/handheld_ceiling/README.md plays into
+  this file with image_topic:=/camera/image camera_info_topic:=/camera/camera_info
+  use_sim_time:=true process_all:=true.
+-->
+<launch>
+  <arg name="marker_map" description="the site's marker_map.yaml"/>
+  <arg name="image_topic" default="/image_raw"/>
+  <arg name="camera_info_topic" default="/camera_info"/>
+  <arg name="pose_topic" default="~/pose"/>
+  <arg name="debug_image_topic" default="~/debug/image"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="process_all" default="false" description="true for a recording: every frame, in order"/>
+
+  <include file="$(find-pkg-share marker_localizer)/launch/localizer.launch.xml">
+    <arg name="marker_map" value="$(var marker_map)"/>
+    <arg name="mode" value="3d"/>
+    <arg name="base_frame" value=""/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="pose_topic" value="$(var pose_topic)"/>
+    <arg name="debug_image_topic" value="$(var debug_image_topic)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="process_all" value="$(var process_all)"/>
+  </include>
+</launch>
