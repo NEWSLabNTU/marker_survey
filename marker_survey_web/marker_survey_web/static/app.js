@@ -1,4 +1,5 @@
-// Marker sheets and identification: the page talks to marker_survey_web's JSON API.
+// Marker sheets and identification, and the tabs: the page talks to marker_survey_web's JSON API.
+// robot.js adds the survey, check and map screens when the page is served by the robot.
 'use strict';
 
 const $ = (id) => document.getElementById(id);
@@ -34,6 +35,15 @@ function job() {
     back_labels: $('back_labels').checked,
     site_map: siteMap,
   };
+}
+
+function showTab() {
+  const name = location.hash.slice(1);
+  const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+  const t = tab && !tab.hidden ? tab : document.querySelector('.tab');
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === t.dataset.tab));
+  document.dispatchEvent(new CustomEvent('tabchange', {detail: t.dataset.tab}));
 }
 
 function el(tag, cls, text) {
@@ -133,10 +143,12 @@ async function init() {
     $('paper').append(o);
   }
 
+  // tabs follow the address (#survey, #check, ...), so a link or an iframe can open one
   document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-    document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === t.dataset.tab));
+    location.hash = t.dataset.tab;
   }));
+  window.addEventListener('hashchange', showTab);
+  showTab();
 
   $('job').addEventListener('input', later);
   $('job').addEventListener('change', later);

@@ -11,6 +11,17 @@
                        map's frame_id, stamped with the image's capture time
        ~/debug/image   the detections and the fit's residuals (only while something
                        subscribes)
+       ~/fixes         std_msgs/String, JSON per image with markers: the fix, the prior
+                       at its stamp, the distance, each marker's use (core/check.py);
+                       only while something subscribes
+       ~/status        std_msgs/String, JSON every second: the map in use, its
+                       markers, the counts; only while something subscribes
+  services
+       ~/reload        std_srvs/Trigger: read the map file again
+
+The map is read from `marker_map`, which can be set at run time (the new file
+is read, and refused if it does not load). A missing file at start is
+waited for: the node localizes once ~/reload or a new marker_map finds one.
 
 Modes (core/localize.py): `3d`, a full 6-DoF pose (wall boards, a vehicle whose
 roll and pitch matter); `planar`, x, y and yaw on a flat floor (ceiling markers,
@@ -19,7 +30,9 @@ or wall boards for a robot on a flat floor). `enabled` can be set at run time:
 """
 
 import collections
+import json
 import math
+import os
 import time
 
 import numpy as np
@@ -27,10 +40,13 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import SetParametersResult
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image, Imu
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
 import tf2_ros
 
 from marker_survey.core import marker_map as mm
@@ -38,6 +54,7 @@ from marker_survey.core.detection import Detector
 from marker_survey.core.se3 import interpolate_T, make_T, matrix_to_quat, quat_to_matrix
 from marker_survey.survey_node import decode, stamp_sec, tf_to_T
 
+from marker_localizer.core.check import fix_record
 from marker_localizer.core.localize import Localizer, roll_pitch_of
 from marker_localizer.params import PARAMETERS, LocalizerParams
 
@@ -54,12 +71,16 @@ class MarkerLocalizerNode(Node):
             self.declare_parameter(k, v)
         gp = lambda k: self.get_parameter(k).value  # noqa: E731
         self.p = p = LocalizerParams(gp)
-        self.map = mm.load(p.marker_map)
-        self.detector = Detector(self.map.dictionary, p.min_marker_px, p.border_margin,
-                                 detect_scale=p.detect_scale, quad_decimate=p.quad_decimate,
-                                 min_contrast=p.min_contrast)
-        self.enabled = p.enabled
+        self.map = self.detector = None
+        self.map_path = p.marker_map
+        self.map_loaded = None
         self.localizer = None
+        if os.path.exists(p.marker_map):
+            self.load_map(p.marker_map)
+        else:
+            self.get_logger().warning(f'no map at {p.marker_map} yet: no fixes until ~/reload '
+                                      'or a new marker_map finds one')
+        self.enabled = p.enabled
         self.undistort = None
         self.K = None
         self.tf_buffer = tf2_ros.Buffer()
@@ -85,6 +106,11 @@ class MarkerLocalizerNode(Node):
             self.create_subscription(Imu, p.imu_topic, self.on_imu, qos_profile_sensor_data)
         self.pub = self.create_publisher(PoseWithCovarianceStamped, p.pose_topic, 10)
         self.pub_dbg = self.create_publisher(Image, '~/debug/image', 1)
+        self.pub_fixes = self.create_publisher(String, '~/fixes', 50)
+        self.pub_status = self.create_publisher(String, '~/status', 1)
+        self.create_service(Trigger, '~/reload', self.on_reload)
+        # wall time: with use_sim_time the status must flow before a recording plays
+        self.create_timer(1.0, self.publish_status, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.add_on_set_parameters_callback(self.on_set)
         self.pending = collections.deque(maxlen=300)
         if p.process_all:
@@ -92,10 +118,37 @@ class MarkerLocalizerNode(Node):
             self.create_timer(0.02, self.drain)
         self.create_timer(10.0, self.on_status)
         self.get_logger().info(
-            f'{len(self.map.markers)} {self.map.dictionary} markers from {p.marker_map} '
-            f'(frame {self.map.frame_id}); mode {p.mode}; '
+            (f'{len(self.map.markers)} {self.map.dictionary} markers from {p.marker_map} '
+             f'(frame {self.map.frame_id})' if self.map is not None else 'no map yet')
+            + f'; mode {p.mode}; '
             + (f'gate against {p.prior_topic}: {p.settings.gate_distance} m, '
                f'{p.settings.gate_angle_deg} deg' if p.prior_topic else 'no prior, no gate'))
+
+    # ------------------------------------------------------------ the map
+    def load_map(self, path: str):
+        """Read a map; raises (OSError, MarkerMapError) and keeps the old one if it fails."""
+        new = mm.load(path)
+        p = self.p
+        if self.detector is None or self.detector.name != new.dictionary:
+            self.detector = Detector(new.dictionary, p.min_marker_px, p.border_margin,
+                                     detect_scale=p.detect_scale, quad_decimate=p.quad_decimate,
+                                     min_contrast=p.min_contrast)
+        self.map, self.map_path = new, path
+        self.map_loaded = time.time()
+        self.localizer = None                       # rebuilt with the new map on the next image
+        return new
+
+    def on_reload(self, request, response):
+        try:
+            m = self.load_map(self.map_path)
+        except (OSError, ValueError) as e:
+            response.success, response.message = False, f'{self.map_path}: {e}'
+            self.get_logger().error(f'reload: {response.message}; the previous map stays in use')
+            return response
+        response.success = True
+        response.message = f'{len(m.markers)} markers from {self.map_path}'
+        self.get_logger().info(f'reloaded: {response.message}')
+        return response
 
     # ------------------------------------------------------------ parameters
     def on_set(self, params):
@@ -103,6 +156,12 @@ class MarkerLocalizerNode(Node):
             if prm.name == 'enabled':
                 self.enabled = bool(prm.value)
                 self.get_logger().info('fixes ' + ('on' if self.enabled else 'OFF'))
+            elif prm.name == 'marker_map':
+                try:
+                    m = self.load_map(str(prm.value))
+                except (OSError, ValueError) as e:
+                    return SetParametersResult(successful=False, reason=f'{prm.value}: {e}')
+                self.get_logger().info(f'map: {len(m.markers)} markers from {prm.value}')
         return SetParametersResult(successful=True)
 
     # ------------------------------------------------------------ inputs
@@ -196,7 +255,7 @@ class MarkerLocalizerNode(Node):
             self.process(msg)
 
     def process(self, msg):
-        if not self.enabled or self.K is None:
+        if not self.enabled or self.K is None or self.map is None:
             return
         if self.localizer is None:
             T = self.lookup(self.p.base_frame, msg.header.frame_id, 0.0)
@@ -246,6 +305,9 @@ class MarkerLocalizerNode(Node):
                                    throttle_duration_sec=2.0)
         if self.pub_dbg.get_subscription_count() > 0:
             self.publish_debug(msg.header, gray, dets, res, publish)
+        if dets and self.pub_fixes.get_subscription_count() > 0:
+            rec = fix_record(res, dets, T_prior, publish, t, self.p.mode)
+            self.pub_fixes.publish(String(data=json.dumps(rec)))
 
     def publish(self, stamp, fix):
         out = PoseWithCovarianceStamped()
@@ -258,6 +320,20 @@ class MarkerLocalizerNode(Node):
          p.orientation.w) = (float(v) for v in matrix_to_quat(T[:3, :3]))
         out.pose.covariance = [float(v) for v in fix.covariance.ravel()]
         self.pub.publish(out)
+
+    def publish_status(self):
+        if self.pub_status.get_subscription_count() == 0:
+            return
+        m = self.map
+        st = {'map': self.map_path, 'loaded': self.map_loaded, 'mode': self.p.mode,
+              'enabled': self.enabled, 'camera': self.K is not None,
+              'prior_topic': self.p.prior_topic, 'counts': dict(self.n),
+              'frame_id': None if m is None else m.frame_id,
+              'dictionary': None if m is None else m.dictionary,
+              'markers': [] if m is None else [
+                  {'id': int(k), 'x': round(float(T[0, 3]), 3), 'y': round(float(T[1, 3]), 3),
+                   'z': round(float(T[2, 3]), 3)} for k, T in sorted(m.poses().items())]}
+        self.pub_status.publish(String(data=json.dumps(st)))
 
     def on_status(self):
         if not self.t_detect:

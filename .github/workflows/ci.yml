@@ -190,3 +190,45 @@ jobs:
         run: lscpu | grep -E 'Architecture|Model name|^CPU\(s\)' || true
       - name: Detection and fit per frame, one core
         run: ci/timing.sh 0
+
+  web-browser:
+    needs: build-and-test
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+    runs-on: ubuntu-24.04
+    container: ros:${{ matrix.distro }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies with rosdep
+        run: |
+          apt-get update
+          rosdep update --rosdistro ${{ matrix.distro }}
+          rosdep install --from-paths . --ignore-src -y --rosdistro ${{ matrix.distro }}
+      - name: Playwright and Chromium (the test only; the page itself needs neither)
+        run: |
+          apt-get install -y --no-install-recommends python3-pip
+          python3 -m pip install --break-system-packages playwright==1.48.0 \
+            || python3 -m pip install playwright==1.48.0
+          python3 -m playwright install --with-deps chromium
+      - name: Build
+        run: |
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          colcon build --event-handlers console_cohesion+
+      - name: Survey, check and use the map from the browser, on simulated recordings
+        run: |
+          source install/setup.bash
+          ci/web_browser.sh ci_out
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: web-browser-${{ matrix.distro }}
+          path: |
+            ci_out/web/shots/
+            ci_out/web/*.log
+            ci_out/web/site/

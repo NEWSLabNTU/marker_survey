@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marker sheets</title>
+<title>Markers</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,7 +12,11 @@
   <nav>
     <button class="tab active" data-tab="print">Print markers</button>
     <button class="tab" data-tab="identify">Identify a marker</button>
+    <button class="tab robot" data-tab="survey" hidden>Survey</button>
+    <button class="tab robot" data-tab="check" hidden>Check</button>
+    <button class="tab robot" data-tab="use" hidden>Use the map</button>
   </nav>
+  <span id="link" class="link-state" hidden></span>
 </header>
 
 <main>
@@ -115,8 +119,175 @@
   <p id="id_result" class="big"></p>
   <img id="id_image" alt="">
 </section>
+
+<section id="survey" class="panel robot-panel">
+  <p id="sv_offline" class="notice" hidden>The survey node does not answer. It runs on the robot
+    (survey.launch.xml with start_paused:=true); this page reconnects by itself.</p>
+
+  <div id="sv_start" class="card" hidden>
+    <h2>Start a survey</h2>
+    <p>Where should the markers go on the map?</p>
+    <div id="sv_frames"></div>
+    <div class="actions">
+      <button id="sv_start_btn" class="primary">Start the survey</button>
+    </div>
+    <p class="note">Then drive slowly past every marker. Each one should be seen from a few
+      places; the list shows a light per marker and says which ones need another pass.</p>
+  </div>
+
+  <div id="sv_run" hidden>
+    <div class="statusbar card">
+      <span id="sv_state" class="state"></span>
+      <span id="sv_counts"></span>
+      <span class="spacer"></span>
+      <button id="sv_pause">Pause</button>
+      <button id="sv_save" class="primary">Save and solve</button>
+    </div>
+    <div class="two">
+      <div class="card">
+        <div class="cardhead"><h3>Camera</h3>
+          <label class="choice small"><input type="checkbox" id="sv_cam_on" checked> show</label></div>
+        <div class="camera"><img id="sv_cam" alt="what the camera sees, markers outlined"></div>
+        <p class="legend"><span class="sw known"></span> known <span class="sw new"></span> new
+          <span class="sw small"></span> too small or cut off</p>
+        <p id="sv_inview" class="note"></p>
+      </div>
+      <div class="card">
+        <div class="cardhead"><h3>Map from above</h3></div>
+        <canvas id="sv_map" class="map" width="600" height="420"></canvas>
+        <p class="legend"><span class="dot good"></span> good <span class="dot again"></span> pass again
+          <span class="dot bad"></span> bad <span class="line"></span> the robot's path</p>
+      </div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3>What to do next</h3>
+        <ul id="sv_hints" class="hints"></ul>
+      </div>
+      <div class="card">
+        <h3>Markers</h3>
+        <table class="list"><thead><tr><th></th><th>Marker</th><th>Seen</th><th>Note</th></tr></thead>
+          <tbody id="sv_markers"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div id="sv_solving" class="card notice" hidden>Solving: every marker and every camera position
+    are fitted together. This takes a few seconds, longer for a large site.</div>
+
+  <div id="sv_report" hidden>
+    <div class="card">
+      <h2>Survey result</h2>
+      <p id="rp_summary" class="big"></p>
+      <p id="rp_detail" class="note"></p>
+      <div class="actions">
+        <button id="rp_again" class="primary">Drive again past the marked ones</button>
+        <a href="#check" class="button">Check the map</a>
+        <a href="#use" class="button">Use the map</a>
+        <button id="rp_new">Start a new survey</button>
+      </div>
+      <p class="note">Driving again adds to this recording; the result so far is kept as an
+        earlier solve.</p>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3>Markers</h3>
+        <table class="list"><thead><tr><th></th><th>Marker</th><th>Seen</th><th>Position &plusmn;</th>
+          <th>Note</th></tr></thead><tbody id="rp_markers"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Map from above</h3>
+        <canvas id="rp_map" class="map" width="600" height="420"></canvas>
+        <h3>Earlier solves</h3>
+        <ul id="rp_history" class="plain"></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="check" class="panel robot-panel">
+  <p id="ck_offline" class="notice" hidden>The localizer does not answer. It runs on the robot
+    (localizer.launch.xml); this page reconnects by itself.</p>
+  <div class="card">
+    <h2>Check the map</h2>
+    <p>Drive the robot along its usual routes. Each time the camera sees markers, the position
+      they give is compared with the robot's own position.</p>
+    <div class="row">
+      <span class="label">Map to check</span>
+      <label class="choice"><input type="radio" name="ck_which" value="survey"> the survey just
+        made (a trial, nothing is written)</label>
+      <label class="choice"><input type="radio" name="ck_which" value="site"> the map in use</label>
+    </div>
+    <p id="ck_reads" class="note"></p>
+  </div>
+  <div class="statusbar card">
+    <div class="figure"><span id="ck_dist" class="bignum">-</span><small>marker fix to robot position, last</small></div>
+    <div class="figure"><span id="ck_median" class="bignum">-</span><small>median</small></div>
+    <div class="figure"><span id="ck_agree" class="bignum">-</span><small>fixes that agree</small></div>
+    <div class="figure"><span id="ck_fixes" class="bignum">0</span><small>fixes</small></div>
+    <span class="spacer"></span>
+    <button id="ck_reset">Count again</button>
+  </div>
+  <div id="ck_flags"></div>
+  <div class="two">
+    <div class="card">
+      <div class="cardhead"><h3>Camera</h3>
+        <label class="choice small"><input type="checkbox" id="ck_cam_on" checked> show</label></div>
+      <div class="camera"><img id="ck_cam" alt="what the localizer sees"></div>
+      <p class="legend"><span class="sw known"></span> used <span class="sw orange"></span> left out
+        <span class="sw small"></span> unusable <span class="sw grey"></span> not in the map</p>
+    </div>
+    <div class="card">
+      <div class="cardhead"><h3>Map from above</h3></div>
+      <canvas id="ck_map" class="map" width="600" height="420"></canvas>
+      <p class="legend"><span class="dot good"></span> fix agrees <span class="dot bad"></span> fix
+        disagrees <span class="dot pose"></span> robot position <span class="sq"></span> marker</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Per marker</h3>
+    <table class="list"><thead><tr><th></th><th>Marker</th><th>Seen</th><th>Used</th><th>Agreed</th>
+      <th>Mean distance</th><th>Note</th></tr></thead><tbody id="ck_markers"></tbody></table>
+    <p id="ck_rule" class="note"></p>
+  </div>
+</section>
+
+<section id="use" class="panel robot-panel">
+  <div class="two">
+    <div class="card">
+      <h2>The map in use</h2>
+      <div id="us_current"></div>
+    </div>
+    <div class="card">
+      <h2>The new survey</h2>
+      <div id="us_new"></div>
+      <div class="actions"><button id="us_write" class="primary" disabled>Write this map</button></div>
+      <div id="us_confirm" class="confirm" hidden>
+        <p id="us_confirm_text"></p>
+        <div class="actions">
+          <button id="us_yes" class="primary">Yes, write it</button>
+          <button id="us_no">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p id="us_result" class="notice" hidden></p>
+  <div class="card">
+    <h3>Earlier versions</h3>
+    <ul id="us_versions" class="plain"></ul>
+    <div class="actions"><button id="us_undo" disabled>Undo: put the previous version back</button></div>
+    <div id="us_undo_confirm" class="confirm" hidden>
+      <p id="us_undo_text"></p>
+      <div class="actions">
+        <button id="us_undo_yes" class="primary">Yes, put it back</button>
+        <button id="us_undo_no">Cancel</button>
+      </div>
+    </div>
+  </div>
+</section>
 </main>
 
 <script src="app.js"></script>
+<script src="robot.js"></script>
 </body>
 </html>

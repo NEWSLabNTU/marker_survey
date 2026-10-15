@@ -28,6 +28,7 @@
   <arg name="floor_offset" default="0.0" description="[m] how far the floor lies below base_frame (a vehicle on a stand)"/>
   <arg name="pose_sd" default="0.05" description="pose_frame: [m] noise of the pose source per axis"/>
   <arg name="process_all" default="false" description="every frame in order, over a reliable subscription (recordings)"/>
+  <arg name="start_paused" default="false" description="record only after ~/start (the web interface starts it)"/>
   <arg name="use_sim_time" default="false"/>
 
   <node pkg="marker_survey" exec="marker_survey" name="marker_survey" output="screen">
@@ -48,6 +49,7 @@
     <param name="floor_offset" value="$(var floor_offset)"/>
     <param name="pose_sd" value="$(var pose_sd)"/>
     <param name="process_all" value="$(var process_all)"/>
+    <param name="start_paused" value="$(var start_paused)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
 </launch>

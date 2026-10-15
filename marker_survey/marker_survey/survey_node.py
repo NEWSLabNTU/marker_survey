@@ -19,28 +19,44 @@ bundle-adjusted and the result is written to `output_dir` in the frame
   out  ~/markers       visualization_msgs/MarkerArray, live
        ~/debug/image   the processed frames with the detections drawn (only while
                        something subscribes)
+       ~/status        std_msgs/String, JSON twice a second: state, keyframes, the
+                       markers with a light and a hint each, the last frame's
+                       detections, the trail (core/live.py); for the web interface
        output_dir/marker_map.yaml, survey_report.yaml, survey_data.npz (solve again
-       with marker_survey_solve)
+       with marker_survey_solve); with keep_history, the previous ones are copied
+       to output_dir/history/<date-time>/ first
+  services (std_srvs/Trigger)
+       ~/save          solve and write
+       ~/start         record (again): after a save, new keyframes add to the
+                       same recording ("pass again")
+       ~/pause         stop recording, keep what was recorded
+       ~/reset         drop the recording and start afresh (files stay)
+  frame.mode and frame.origin_marker can be set at run time, before a save.
 """
 
 import collections
+import json
 import os
 import threading
 
 import numpy as np
 import rclpy
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import SetParametersResult
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 import tf2_ros
 from visualization_msgs.msg import Marker, MarkerArray
 
+from marker_survey.core import live
 from marker_survey.core.detection import Detector
 from marker_survey.core.se3 import interpolate_T, make_T, matrix_to_quat, quat_to_matrix
-from marker_survey.core.solve import DATA_FILE, finish, save_dump
+from marker_survey.core.solve import DATA_FILE, MAP_FILE, REPORT_FILE, finish, save_dump
 from marker_survey.core.survey import Survey
 from marker_survey.params import PARAMETERS, SurveyParams
 
@@ -77,7 +93,10 @@ class MarkerSurveyNode(Node):
         for k, v in PARAMETERS.items():
             self.declare_parameter(k, v)
         gp = lambda k: self.get_parameter(k).value  # noqa: E731
-        self.p = p = SurveyParams(gp)
+        self.recording = not bool(gp('start_paused'))
+        self.keep_history = bool(gp('keep_history'))
+        # paused at start, the frame can be chosen later (from the web interface)
+        self.p = p = SurveyParams(gp, check_frame=self.recording)
         self.process_all = bool(gp('process_all'))
         self.detector = Detector(p.dictionary, p.min_marker_px, p.border_margin)
         self.compressed = bool(gp('compressed'))
@@ -97,6 +116,12 @@ class MarkerSurveyNode(Node):
         self.frames = 0
         self.no_pose = 0
         self.saved = False
+        self.K = None
+        self.last_dets = []
+        self.last_T_base = None
+        self.report = None              # the last solve's report, and the views it saw
+        self.report_views = {}
+        self.last_save = None
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
@@ -119,15 +144,78 @@ class MarkerSurveyNode(Node):
         self.pub = self.create_publisher(MarkerArray, '~/markers', 1)
         self.pub_dbg = self.create_publisher(Image, '~/debug/image', 1)
         self.debug_width = int(gp('debug_width'))
+        self.pub_status = self.create_publisher(String, '~/status', 1)
         self.create_service(Trigger, '~/save', self.on_save)
+        self.create_service(Trigger, '~/start', self.on_start)
+        self.create_service(Trigger, '~/pause', self.on_pause)
+        self.create_service(Trigger, '~/reset', self.on_reset)
+        self.add_on_set_parameters_callback(self.on_set)
         self.create_timer(1.0 / float(gp('rate')), self.on_tick)
         self.create_timer(5.0, self.on_status)
+        # wall time: with use_sim_time the status must flow before a recording plays
+        self.create_timer(0.5, self.publish_status, clock=Clock(clock_type=ClockType.STEADY_TIME))
         origin = f'origin marker {self.origin}' if self.origin is not None else ''
         self.get_logger().info(
             f'surveying {p.dictionary} markers; marker_size {p.settings.marker_size} m is the edge '
             'of the BLACK SQUARE, not of the sheet: measure it, a wrong size scales every distance. '
             f'Frame mode {p.frame.mode} {origin}; output -> {p.output_dir}. Drive slowly past '
-            'every marker; Ctrl-C (or the ~/save service) solves and writes the map.')
+            'every marker; Ctrl-C (or the ~/save service) solves and writes the map.'
+            + ('' if self.recording else ' Paused: ~/start begins recording.'))
+
+    # ------------------------------------------------------------ control
+    def on_set(self, params):
+        """frame.* at run time: checked as at start; the solve uses them."""
+        names = {'frame.mode', 'frame.origin_marker', 'frame.frame_id'}
+        new = {prm.name: prm.value for prm in params if prm.name in names}
+        if not new:
+            return SetParametersResult(successful=True)
+        try:
+            p = SurveyParams(lambda k: new[k] if k in new else self.get_parameter(k).value,
+                             check_frame=False)
+            if p.frame.mode == 'pose_frame' and self.p.pose_source != 'tf':
+                raise ValueError('frame.mode pose_frame needs pose_source tf (a map pose)')
+        except ValueError as e:
+            return SetParametersResult(successful=False, reason=str(e))
+        self.p = p
+        self.origin = p.frame.origin_marker
+        if self.survey is not None:
+            for k in ('motion_factors', 'pose_priors', 'pose_sd', 'pose_sd_rot'):
+                setattr(self.survey.s, k, getattr(p.settings, k))
+        self.get_logger().info(f'frame mode {p.frame.mode}'
+                               + (f', origin marker {self.origin}' if self.origin is not None else ''))
+        return SetParametersResult(successful=True)
+
+    def on_start(self, request, response):
+        try:
+            self.p.frame.check()
+        except ValueError as e:
+            response.success, response.message = False, str(e)
+            return response
+        self.recording = True
+        response.success, response.message = True, 'recording'
+        self.get_logger().info('recording')
+        return response
+
+    def on_pause(self, request, response):
+        self.recording = False
+        self.queue.clear()
+        response.success, response.message = True, 'paused'
+        self.get_logger().info('paused')
+        return response
+
+    def on_reset(self, request, response):
+        with self.lock:
+            if self.K is not None:
+                old = self.survey
+                self.survey = Survey(self.p.settings, self.K)
+                if old is not None:
+                    self.survey.T_cam_base = old.T_cam_base
+            self.frames = self.no_pose = 0
+            self.report, self.report_views, self.last_save = None, {}, None
+            self.last_dets, self.saved = [], False
+        response.success, response.message = True, 'recording dropped; files kept'
+        self.get_logger().info('reset: a new recording')
+        return response
 
     # ------------------------------------------------------------ inputs
     def on_info(self, msg):
@@ -141,6 +229,7 @@ class MarkerSurveyNode(Node):
                 K = (np.array(msg.p, float).reshape(3, 4)[:, :3] if any(msg.p)
                      else np.array(msg.k, float).reshape(3, 3))
                 what = 'rectified'
+            self.K = K
             self.survey = Survey(self.p.settings, K)
             self.get_logger().info(f'camera: {msg.width}x{msg.height}, fx {K[0, 0]:.1f} px, {what}')
 
@@ -152,6 +241,8 @@ class MarkerSurveyNode(Node):
         self.odom_frame = msg.header.frame_id
 
     def on_image(self, msg):
+        if not self.recording:
+            return
         if not self.process_all:
             self.queue.clear()          # live: only the newest frame matters
         self.queue.append(msg)
@@ -225,7 +316,7 @@ class MarkerSurveyNode(Node):
                                    throttle_duration_sec=5.0)
             return False
         T_ref = None
-        if self.p.frame.mode == 'align_to_track':
+        if self.p.reference_frame:         # recorded whenever there is one: the mode may change
             T_ref = self.lookup(self.p.reference_frame, self.p.base_frame, t)
         try:
             gray = decode(msg, self.compressed)
@@ -245,6 +336,9 @@ class MarkerSurveyNode(Node):
             n_kf = len(self.survey.keyframes)
             new = self.survey.add(t, T, dets, T_ref)
             keyframe = len(self.survey.keyframes) > n_kf
+            self.last_dets = live.detection_states(self.survey, dets, known)
+            if self.survey.T_cam_base is not None:
+                self.last_T_base = T @ self.survey.T_cam_base
         if self.pub_dbg.get_subscription_count() > 0:
             self.publish_debug(msg.header, gray, dets, known, keyframe)
         for mid in new:
@@ -268,6 +362,30 @@ class MarkerSurveyNode(Node):
         self.get_logger().info(f'{self.frames} frames{dropped}, {len(self.survey.keyframes)} keyframes; '
                                f'markers (views) {views or "none"}{origin}')
         self.publish_markers()
+
+    def status(self) -> dict:
+        p = self.p
+        frame = {'mode': p.frame.mode, 'origin_marker': p.frame.origin_marker,
+                 'frame_id': p.frame.frame_id, 'reference_frame': p.reference_frame,
+                 'pose_source': p.pose_source, 'pose_frame': p.pose_frame,
+                 'odom_frame': self.odom_frame if p.pose_source == 'odometry' else p.pose_frame}
+        state = 'recording' if self.recording else 'paused'
+        with self.lock:
+            out = live.status_dict(
+                self.survey, state, frame, self.report, self.report_views, self.last_dets,
+                self.last_T_base,
+                {'camera': self.survey is not None, 'frames': self.frames, 'dropped': self.no_pose,
+                 'queued': len(self.queue),
+                 'output_dir': p.output_dir, 'dictionary': p.dictionary,
+                 'marker_size': p.settings.marker_size, 'last_save': self.last_save,
+                 'origin_seen': (self.origin is not None and self.survey is not None
+                                 and self.origin in self.survey.markers)})
+        return out
+
+    def publish_status(self):
+        if self.pub_status.get_subscription_count() == 0:
+            return
+        self.pub_status.publish(String(data=json.dumps(self.status())))
 
     def publish_debug(self, header, gray, dets, known, keyframe):
         """The frame with every detection drawn: green a known marker, yellow one seen
@@ -340,6 +458,10 @@ class MarkerSurveyNode(Node):
             if self.survey is None or not self.survey.keyframes:
                 return False, 'nothing recorded'
             os.makedirs(self.p.output_dir, exist_ok=True)
+            if self.keep_history:
+                kept = live.keep_previous(self.p.output_dir, [MAP_FILE, REPORT_FILE, DATA_FILE])
+                if kept:
+                    self.get_logger().info(f'the previous solve is kept in {kept}')
             dump = os.path.join(self.p.output_dir, DATA_FILE)
             save_dump(dump, self.survey, self.p.dictionary, self.p.frame)
             log = self.get_logger().info
@@ -350,11 +472,16 @@ class MarkerSurveyNode(Node):
             except ValueError as e:
                 self.get_logger().error(f'not solved: {e}. The recording is in {dump}: '
                                         'marker_survey_solve can try again.')
+                self.last_save = {'ok': False, 'message': str(e)}
                 return False, str(e)
+            self.report = res['report']
+            self.report_views = {k: v['views'] for k, v in live.marker_places(self.survey).items()}
         self.saved = True
         flagged = [m.id for m in res['markers'] if m.verdict != 'good']
-        return True, (f'{len(res["markers"])} markers written to {self.p.output_dir}'
-                      + (f'; check {flagged}' if flagged else ''))
+        msg = (f'{len(res["markers"])} markers written to {self.p.output_dir}'
+               + (f'; check {flagged}' if flagged else ''))
+        self.last_save = {'ok': True, 'message': msg, 'date': self.report.get('date')}
+        return True, msg
 
     def on_save(self, request, response):
         response.success, response.message = self.save()

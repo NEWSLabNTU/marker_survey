@@ -46,7 +46,15 @@ def finish(survey: Survey, frame: fr.FrameSettings, dictionary: str, output_dir:
             'markers for the real thing.')
     else:
         log(f'solving: {len(survey.keyframes)} keyframes, {len(survey.markers)} markers ...')
-        markers, poses, stats, info = survey.solve(max_nfev=max_nfev)
+        # a reference track anchors the uncertainty only when the result is aligned to it
+        # (the survey node records it whenever there is one, since the mode can change)
+        track_sd = survey.s.track_sd
+        if frame.mode != 'align_to_track':
+            survey.s.track_sd = 0.0
+        try:
+            markers, poses, stats, info = survey.solve(max_nfev=max_nfev)
+        finally:
+            survey.s.track_sd = track_sd
         log(f'solved: reprojection RMS {info["reproj_rms_px"]:.2f} px ({info["status"]})')
     base = [T @ survey.T_cam_base for T in poses]
     floor_p, floor_n = fr.floor_from_base_poses(base, frame.floor_offset)

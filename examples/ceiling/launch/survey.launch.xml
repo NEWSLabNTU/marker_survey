@@ -29,6 +29,7 @@
   <arg name="base_frame" default="base_link"/>
   <arg name="use_sim_time" default="false"/>
   <arg name="process_all" default="false" description="true for a recording: every frame, in order"/>
+  <arg name="start_paused" default="false" description="true: record only once the web interface starts the survey"/>
 
   <include file="$(find-pkg-share marker_survey)/launch/survey.launch.xml">
     <arg name="output_dir" value="$(var output_dir)"/>
@@ -43,5 +44,6 @@
     <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
     <arg name="process_all" value="$(var process_all)"/>
+    <arg name="start_paused" value="$(var start_paused)"/>
   </include>
 </launch>

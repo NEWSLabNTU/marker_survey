@@ -27,7 +27,7 @@ class SurveyParams:
     """The node's parameters, read and checked; kept separate from the node so the
     checks are testable."""
 
-    def __init__(self, get):
+    def __init__(self, get, check_frame: bool = True):
         self.output_dir = str(get('output_dir'))
         if not self.output_dir:
             raise ValueError('set output_dir: where marker_map.yaml is written')
@@ -40,7 +40,10 @@ class SurveyParams:
             raise ValueError(f'frame.mode {self.frame.mode!r} is not one of {", ".join(FRAME_MODES)}')
         if self.frame.mode != 'origin_marker':
             self.frame.origin_marker = None
-        self.frame.check()
+        elif self.frame.origin_marker is not None and self.frame.origin_marker < 0:
+            self.frame.origin_marker = None
+        if check_frame:
+            self.frame.check()
         src = str(get('pose_source'))
         if src not in POSE_SOURCES:
             raise ValueError(f'pose_source {src!r} is not one of odometry, tf')
@@ -106,4 +109,6 @@ PARAMETERS = {
     'min_marker_px': 20.0,
     'border_margin_px': 5.0,
     'debug_width': 960,
+    'start_paused': False,
+    'keep_history': True,
 }

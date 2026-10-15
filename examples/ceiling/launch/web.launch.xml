@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<!--
+  Ceiling markers from the browser: the survey (paused until the page starts
+  it), the localizer on the site's map, and the web interface, in one launch.
+  The robot's own launch runs the camera driver, the wheel odometry, the LiDAR
+  localizer and the state estimator, as for survey.launch.xml and
+  localizer.launch.xml. Then:
+
+    ros2 launch examples/ceiling/launch/web.launch.xml site:=$PWD/sites/my_site
+
+  and open http://<the robot's address>:8090/. The survey writes to
+  <site>/survey/; "Use the map" writes <site>/marker_map.yaml, which the
+  localizer reads (it waits for the file on a new site).
+
+  The simulated recording of docs/integration.md plays into this file with
+  image_topic:=/camera/image camera_info_topic:=/camera/camera_info
+  prior_topic:=/prior_pose prior_type:=pose use_sim_time:=true process_all:=true.
+-->
+<launch>
+  <arg name="site" description="the site's directory: marker_map.yaml and survey/ in it"/>
+  <arg name="image_topic" default="/ceiling_camera/image_raw"/>
+  <arg name="camera_info_topic" default="/ceiling_camera/camera_info"/>
+  <arg name="prior_topic" default="/odometry/filtered"/>
+  <arg name="prior_type" default="odometry"/>
+  <arg name="port" default="8090"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="process_all" default="false"/>
+  <let name="here" value="$(dirname)"/>
+
+  <include file="$(var here)/survey.launch.xml">
+    <arg name="output_dir" value="$(var site)/survey"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="process_all" value="$(var process_all)"/>
+    <arg name="start_paused" value="true"/>
+  </include>
+  <include file="$(var here)/localizer.launch.xml">
+    <arg name="marker_map" value="$(var site)/marker_map.yaml"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="prior_topic" value="$(var prior_topic)"/>
+    <arg name="prior_type" value="$(var prior_type)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="process_all" value="$(var process_all)"/>
+  </include>
+  <include file="$(find-pkg-share marker_survey_web)/launch/web.launch.xml">
+    <arg name="map_path" value="$(var site)/marker_map.yaml"/>
+    <arg name="port" value="$(var port)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+  </include>
+</launch>

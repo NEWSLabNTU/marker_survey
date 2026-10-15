@@ -4,6 +4,60 @@ Versions follow semantic versioning. Every change of a parameter, a launch
 argument, a topic or a file format gets an entry. The marker map file has
 its own `version` (now 1); the loader keeps reading older versions.
 
+## Unreleased
+
+The web interface on the robot: survey, check and use the map from a
+browser (phase 5).
+
+### Packages
+
+- `marker_survey_web`: the ROS 2 node `marker_survey_web_node` and
+  `launch/web.launch.xml`: the survey, check and map screens, the JSON API
+  (`/api/state`, `/api/survey`, `/api/report`, `/api/map`, `/api/check`) and
+  the WebSocket `/api/live` (the state twice a second, camera frames as
+  JPEG only while shown). Parameters `host`, `port`, `survey_node`,
+  `localizer_node`, `map_path`, `camera_rate`, `camera_width`, `check.*`.
+  `marker_survey_web` without ROS still serves printing and identifying.
+  The package now depends on `marker_localizer`, `rclpy` and the message
+  packages.
+- `marker_survey`: `core/live.py`, the survey's status (lights, hints,
+  detections) and the kept earlier solves; a reference track recorded in a
+  mode other than `align_to_track` no longer anchors the uncertainty.
+- `marker_localizer`: `core/check.py`, fix records and per-marker agreement
+  with the estimator's pose.
+
+### Nodes and launch files
+
+- Survey node: topic `~/status` (`std_msgs/String`, JSON); services
+  `~/start`, `~/pause`, `~/reset`; parameters `start_paused` (false) and
+  `keep_history` (true: the previous `marker_map.yaml`,
+  `survey_report.yaml` and `survey_data.npz` are copied to
+  `output_dir/history/<date-time>/` before a save); `frame.mode`,
+  `frame.origin_marker` and `frame.frame_id` can be set at run time;
+  `frame.reference_frame` is looked up whenever it is set, not only in
+  `align_to_track`. `survey.launch.xml` and the ceiling example's survey
+  launch file take `start_paused`.
+- Localizer node: topics `~/fixes` and `~/status` (`std_msgs/String`,
+  JSON, only while subscribed); service `~/reload`; `marker_map` can be
+  set at run time (refused if the file does not load); a map file missing
+  at start is waited for instead of stopping the node.
+- `examples/ceiling/launch/web.launch.xml`: survey, localizer and web
+  interface in one launch.
+
+### Files
+
+- Beside the map in use, `marker_map_versions/` keeps every map the web
+  interface replaced (`marker_map.<date-time>.yaml`, and
+  `.undone.yaml` for the ones undo replaced).
+
+### Tools and tests
+
+- `marker_survey_synthetic --split-at S` also writes the recording in two
+  parts (`bag_1`, `bag_2`), and `--start-time` sets its first stamp.
+- `ci/web_browser.sh` and `ci/web_browser_test.py`: the survey, check and
+  map steps in Chromium (Playwright) on simulated recordings; CI job
+  `web-browser`.
+
 ## 0.1.0 (2026-10-15)
 
 The first release: the survey, the marker map file and the localizer for

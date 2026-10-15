@@ -15,7 +15,11 @@ rosbag2 with the topics the survey node reads:
                          localizer pose at every image's stamp (a state
                          estimator's pose, for the localizer's gate)
 
-and beside it the truth: truth_map.yaml (the markers in the map frame, what
+With --split-at S, also bag_1 (the first S seconds) and bag_2 (the rest),
+each with /tf_static: a drive that stops and goes on, as a survey that is
+saved and then continued ("pass again") sees it.
+
+And beside it the truth: truth_map.yaml (the markers in the map frame, what
 pose_frame and align_to_track surveys should give), with --origin
 truth_origin.yaml (in the frame of that marker, what origin_marker gives), and
 truth_poses.csv (stamp and true base_link pose in the map of every image, to
@@ -96,6 +100,11 @@ def parse_args(argv=None):
                     help='[m] sd per horizontal axis of the map -> base_link pose')
     ap.add_argument('--map-noise-yaw-deg', type=float, default=0.0)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--start-time', type=float, default=1_000_000_000.0,
+                    help='[s] the stamp the recording starts at; a later one for a second drive '
+                         'played after the first')
+    ap.add_argument('--split-at', type=float,
+                    help='[s] also write bag_1 (up to this time into the drive) and bag_2 (the rest)')
     return ap.parse_args(argv)
 
 
@@ -134,12 +143,17 @@ def main(argv=None):
 
     os.makedirs(args.out, exist_ok=True)
     bag = os.path.join(args.out, 'bag')
-    if os.path.exists(bag):
-        import shutil
-        shutil.rmtree(bag)
-    w = rosbag2_py.SequentialWriter()
-    w.open(rosbag2_py.StorageOptions(uri=bag, storage_id='sqlite3'),
-           rosbag2_py.ConverterOptions('', ''))
+    names = [bag] + ([os.path.join(args.out, 'bag_1'), os.path.join(args.out, 'bag_2')]
+                     if args.split_at is not None else [])
+    writers = []
+    for b in names:
+        if os.path.exists(b):
+            import shutil
+            shutil.rmtree(b)
+        wr = rosbag2_py.SequentialWriter()
+        wr.open(rosbag2_py.StorageOptions(uri=b, storage_id='sqlite3'),
+                rosbag2_py.ConverterOptions('', ''))
+        writers.append(wr)
     topics = {
         '/camera/image': 'sensor_msgs/msg/Image',
         '/camera/camera_info': 'sensor_msgs/msg/CameraInfo',
@@ -148,10 +162,18 @@ def main(argv=None):
         '/tf_static': 'tf2_msgs/msg/TFMessage',
         '/prior_pose': 'geometry_msgs/msg/PoseWithCovarianceStamped',
     }
-    for n, (name, typ) in enumerate(topics.items()):
-        w.create_topic(topic_metadata(rosbag2_py, n, name, typ,
-                                      TF_STATIC_QOS if name == '/tf_static' else ''))
-    t0 = 1_000_000_000.0
+    for wr in writers:
+        for n, (name, typ) in enumerate(topics.items()):
+            wr.create_topic(topic_metadata(rosbag2_py, n, name, typ,
+                                           TF_STATIC_QOS if name == '/tf_static' else ''))
+    t0 = float(args.start_time)
+    split_ns = None if args.split_at is None else int(round((t0 + 1.0 + args.split_at) * 1e9))
+
+    def put(topic, data, t_ns):
+        """Into the whole recording, and into the part the time falls in."""
+        writers[0].write(topic, data, t_ns)
+        if split_ns is not None:
+            writers[1 if t_ns < split_ns else 2].write(topic, data, t_ns)
 
     def stamp(header, t):
         header.stamp.sec = int(t)
@@ -177,7 +199,10 @@ def main(argv=None):
 
     static = TFMessage(transforms=[tfs('base_link', 'camera_link', T_base_link, t0),
                                    tfs('camera_link', 'camera_optical_frame', T_link_opt, t0)])
-    w.write('/tf_static', ser.serialize_message(static), ns(t0))
+    for wr in writers[:2]:
+        wr.write('/tf_static', ser.serialize_message(static), ns(t0))
+    if split_ns is not None:            # the second part starts where it starts: its own static TF
+        writers[2].write('/tf_static', ser.serialize_message(static), split_ns)
 
     odo_div = 3                        # odometry 3x the camera rate
     dt = 1.0 / args.rate
@@ -197,12 +222,12 @@ def main(argv=None):
              o.pose.pose.position.z) = (float(v) for v in Tj[:3, 3])
             (o.pose.pose.orientation.x, o.pose.pose.orientation.y, o.pose.pose.orientation.z,
              o.pose.pose.orientation.w) = (float(v) for v in matrix_to_quat(Tj[:3, :3]))
-            w.write('/odom', ser.serialize_message(o), ns(tj))
+            put('/odom', ser.serialize_message(o), ns(tj))
             tf = [tfs('odom', 'base_link', Tj, tj)]
             if j == odo_div:
                 T_map_odom = f.T_mapmeas_base @ inv_T(f.T_odom_base)
                 tf.append(tfs('map', 'odom', T_map_odom, tj))
-            w.write('/tf', ser.serialize_message(TFMessage(transforms=tf)), ns(tj))
+            put('/tf', ser.serialize_message(TFMessage(transforms=tf)), ns(tj))
         pr = PoseWithCovarianceStamped()
         stamp(pr.header, t)
         pr.header.frame_id = 'map'
@@ -213,7 +238,7 @@ def main(argv=None):
          pr.pose.pose.orientation.w) = (float(v) for v in matrix_to_quat(P[:3, :3]))
         cov = np.diag([prior_var[0], prior_var[0], 1e-4, 1e-4, 1e-4, prior_var[1]])
         pr.pose.covariance = [float(v) for v in cov.ravel()]
-        w.write('/prior_pose', ser.serialize_message(pr), ns(t) - 1)
+        put('/prior_pose', ser.serialize_message(pr), ns(t) - 1)
         Tt = f.T_map_base
         truth_rows.append((msg_stamp(t), *Tt[:3, 3], *matrix_to_quat(Tt[:3, :3])))
         img = renderer.render(markers, sizes, f.T_map_base @ camera.T_base_cam)
@@ -230,9 +255,9 @@ def main(argv=None):
                   0.0, 0.0, 1.0, 0.0]
         info.d = [0.0] * 5
         info.distortion_model = 'plumb_bob'
-        w.write('/camera/image', ser.serialize_message(msg), ns(t))
-        w.write('/camera/camera_info', ser.serialize_message(info), ns(t))
-    del w
+        put('/camera/image', ser.serialize_message(msg), ns(t))
+        put('/camera/camera_info', ser.serialize_message(info), ns(t))
+    writers.clear()                    # closes the bags
 
     mm.write(truth_map(site, np.eye(4), f'Truth of the synthetic recording, frame {site.frame_id}.'),
              os.path.join(args.out, 'truth_map.yaml'))

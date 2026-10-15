@@ -1,13 +1,17 @@
-"""marker_survey_web: the browser interface. This part: print markers, identify markers.
+"""marker_survey_web: the browser interface. Print markers, identify markers; on the robot
+also survey, check and use the map.
 
     marker_survey_web                      # http://127.0.0.1:8090 on this computer
     marker_survey_web --host 0.0.0.0       # reachable from a phone on the same network
     marker_survey_web --open               # and open a browser
+    ros2 run marker_survey_web marker_survey_web_node   # on the robot: all five steps (node.py)
 
-Python's standard HTTP server and the core modules of marker_survey: no ROS,
-no build step, no internet, so it runs on a laptop as well as on a robot.
-The page and the command-line tools share the same code (core/sheets.py,
-core/identify.py): a PDF downloaded here is the one marker_sheets writes.
+Python's standard HTTP server and the core modules of marker_survey: no build
+step, no internet. Without ROS (a laptop) the page prints and identifies
+markers; the ROS node adds the survey, check and map screens, which talk to
+the survey and localizer nodes through hub.py. The page and the command-line
+tools share the same code (core/sheets.py, core/identify.py): a PDF
+downloaded here is the one marker_sheets writes.
 
 API (JSON in and out unless said otherwise):
 
@@ -17,6 +21,20 @@ API (JSON in and out unless said otherwise):
   POST /api/size              ceiling height, camera -> recommended marker size
   POST /api/identify          {"image": data URL, "dictionary"} -> IDs, annotated image
 
+On the robot (hub.py; without a robot they answer {"ok": false}):
+
+  GET  /api/state             robot connected, survey status, localizer status, check, map
+  POST /api/survey            {"action": "start", "frame": {"use": "robot_map"} or
+                              {"use": "marker", "marker": 7}}; "resume", "pause", "save"
+                              (solves, answers with the report), "reset"
+  GET  /api/report            the last survey_report.yaml and the kept earlier solves
+  GET  /api/map               the map in use, its versions, what the survey would change
+  POST /api/map               {"action": "preview"}; {"action": "use" | "undo", "confirm": true}
+  GET  /api/check             fixes against the fused pose, per-marker agreement
+  POST /api/check             {"action": "reset"}; {"action": "map", "which": "survey" | "site"}
+  WS   /api/live              the state twice a second (JSON); camera frames as JPEG (binary)
+                              while the page asks for them: {"camera": "survey" | "check" | null}
+
 A print job: {"size": "45cm", "count": 24, "ids": "", "dictionary": "tag36h11",
 "paper": "auto", "border": "", "per_page": "auto", "split": false,
 "labels": true, "back_labels": false, "exclude": "", "site_map": "<yaml>"}.
@@ -25,20 +43,20 @@ import argparse
 import base64
 import json
 import os
+import queue
 import threading
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from marker_survey_web import websocket as ws
+from marker_survey_web.hub import ApiError, Hub
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 MAX_BODY = 30 * 1024 * 1024          # a phone photo as a data URL fits
 PREVIEW_PAGES = 6
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png'}
-
-
-class ApiError(Exception):
-    pass
 
 
 def _job(body: dict):
@@ -180,8 +198,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split('?', 1)[0]
+        hub = self.server.hub
         if path == '/api/info':
             return self._json(api_info())
+        if path == '/api/live':
+            if not ws.is_upgrade(self.headers):
+                return self._send(HTTPStatus.BAD_REQUEST, 'text/plain', b'a WebSocket address')
+            return self.live(hub)
+        gets = {'/api/state': hub.state, '/api/report': hub.report, '/api/map': hub.map_info,
+                '/api/check': hub.check_summary}
+        if path in gets:
+            try:
+                return self._json(gets[path]())
+            except ApiError as e:
+                return self._json({'ok': False, 'error': str(e)})
         if path in ('/', ''):
             path = '/index.html'
         full = os.path.normpath(os.path.join(STATIC, path.lstrip('/')))
@@ -209,17 +239,71 @@ class Handler(BaseHTTPRequestHandler):
                 name, ctype, data = api_download(body)
                 return self._send(HTTPStatus.OK, ctype, data,
                                   {'Content-Disposition': f'attachment; filename="{name}"'})
-            fn = ROUTES.get(path)
+            hub = self.server.hub
+            fn = {'/api/survey': hub.survey_action, '/api/map': hub.map_action,
+                  '/api/check': hub.check_action}.get(path) or ROUTES.get(path)
             if fn is None:
                 return self._json({'ok': False, 'error': 'unknown address'}, HTTPStatus.NOT_FOUND)
             return self._json(fn(body))
         except (ApiError, SheetError, MarkerMapError, ValueError) as e:
             return self._json({'ok': False, 'error': str(e)}, HTTPStatus.OK)
 
+    def live(self, hub):
+        """WebSocket /api/live: the state as JSON twice a second, camera frames as JPEG."""
+        ws.handshake(self)
+        self.close_connection = True
+        client = hub.add_client()
+        wlock = threading.Lock()
 
-def make_server(host='127.0.0.1', port=8090) -> ThreadingHTTPServer:
+        def send(data: bytes):
+            with wlock:
+                self.wfile.write(data)
+                self.wfile.flush()
+
+        def reader():
+            try:
+                while True:
+                    op, payload = ws.read_message(self.rfile, send)
+                    if op == ws.TEXT:
+                        hub.on_message(client, payload.decode('utf-8', 'replace'))
+            except (ws.Closed, OSError, ValueError):
+                pass
+            finally:
+                try:
+                    client.out.put(None, timeout=1.0)
+                except queue.Full:
+                    pass
+
+        threading.Thread(target=reader, daemon=True).start()
+        try:
+            while True:
+                try:
+                    item = client.out.get(timeout=15.0)
+                except queue.Empty:
+                    send(ws.encode(ws.PING, b''))
+                    continue
+                if item is None:
+                    break
+                kind, data = item
+                send(ws.encode(ws.TEXT, data.encode()) if kind == 'text' else ws.encode(ws.BINARY, data))
+        except OSError:
+            pass
+        finally:
+            hub.remove_client(client)
+            try:
+                send(ws.encode(ws.CLOSE, b''))
+            except OSError:
+                pass
+
+
+def make_server(host='127.0.0.1', port=8090, hub: Hub = None) -> ThreadingHTTPServer:
+    """The HTTP server; with a hub that has a robot, also the survey, check and map API
+    and the live state pushed to every open page."""
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
+    server.hub = hub or Hub(None)
+    if server.hub.robot is not None:
+        threading.Thread(target=server.hub.run_broadcast, daemon=True).start()
     return server
 
 

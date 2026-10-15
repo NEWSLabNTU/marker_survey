@@ -66,10 +66,19 @@ ros2 launch marker_survey survey.launch.xml output_dir:=$PWD/sites/my_site \
 | TF (in) | image frame -> `base_frame`; `pose_source: tf`: `pose_frame` -> image frame at the image's stamp; `align_to_track`: `frame.reference_frame` -> `base_frame` at the image's stamp; odometry: its `child_frame_id` -> image frame | |
 | `~/markers` (out) | `visualization_msgs/MarkerArray` | the markers so far, for RViz |
 | `~/debug/image` (out) | `sensor_msgs/Image` | detections drawn: green known, yellow new, red not used; only while subscribed |
+| `~/status` (out) | `std_msgs/String` | JSON twice a second, only while subscribed: state, keyframes, every marker with its live position, a light (`good`, `pass again`, after a save the report's verdict) and a hint, the last frame's detections, the path; for the web interface |
 | `~/save` (service) | `std_srvs/Trigger` | solve and write now; Ctrl-C does the same (`save_on_exit`) |
+| `~/start`, `~/pause` (services) | `std_srvs/Trigger` | record, or stop recording and keep what was recorded; after a save, new keyframes add to the same recording ("pass again") |
+| `~/reset` (service) | `std_srvs/Trigger` | drop the recording and start afresh; the files stay |
 
 It writes `marker_map.yaml`, `survey_report.yaml` and `survey_data.npz` to
-`output_dir`.
+`output_dir`; with `keep_history` the previous three are first copied to
+`output_dir/history/<date-time>/`, so a survey saved again (after another
+pass) keeps the earlier solve and its recording. `frame.mode` and
+`frame.origin_marker` can be set at run time (`ros2 param set`), before a
+save; the web interface sets them when a survey starts. A reference frame
+(`frame.reference_frame`) is recorded whenever it is in TF, so that the mode
+can change, and anchors the uncertainty only in `align_to_track`.
 
 Parameters (`marker_survey/marker_survey/params.py`; the launch file passes
 the ones marked with an argument of the same name, `frame.mode` as
@@ -107,6 +116,8 @@ the ones marked with an argument of the same name, `frame.mode` as
 | `min_marker_px` | 20.0 | | markers smaller than this [px] are not used |
 | `border_margin_px` | 5.0 | | markers this close to the image border are not used |
 | `debug_width` | 960 | | [px] width of `~/debug/image` |
+| `start_paused` | false | yes | record only after `~/start` (the web interface starts it); the frame may then be chosen later |
+| `keep_history` | true | | copy the previous result to `output_dir/history/` before a save overwrites it |
 
 ## The localizer node
 
@@ -123,12 +134,20 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/sites/my_site
 | `imu_topic` (in, `roll_pitch: imu`) | `sensor_msgs/Imu` | its orientation gives roll and pitch |
 | `pose_topic` (out, default `~/pose`, so `/marker_localizer/pose`) | `geometry_msgs/PoseWithCovarianceStamped` | `base_frame` in the map's `frame_id`, stamped with the image's capture time |
 | `~/debug/image` (out) | `sensor_msgs/Image` | markers used (green, map corners projected with the fix as dots, residual written), left out (orange), unusable (red), not in the map (grey), and the fix; only while subscribed |
+| `~/fixes` (out) | `std_msgs/String` | JSON per image with markers, only while subscribed: the fix (or why none), the prior at its stamp, the distance between them, and what became of each marker in view (`marker_localizer/core/check.py`) |
+| `~/status` (out) | `std_msgs/String` | JSON every second, only while subscribed: the map file in use, its markers, the counts |
+| `~/reload` (service) | `std_srvs/Trigger` | read the map file again; a file that does not load is refused and the old map stays |
+
+`marker_map` can also be set at run time: the new file is read at once, and
+the change is refused if it does not load. A map file that does not exist
+when the node starts is waited for (a new site): the node publishes nothing
+until `~/reload` or a new `marker_map` finds one.
 
 Parameters (`marker_localizer/marker_localizer/params.py`):
 
 | Parameter | Default | Launch arg | Meaning |
 |---|---|---|---|
-| `marker_map` | (required) | yes | the site's `marker_map.yaml`; its `dictionary`, sizes and `frame_id` are used |
+| `marker_map` | (required) | yes | the site's `marker_map.yaml`; its `dictionary`, sizes and `frame_id` are used; settable at run time |
 | `mode` | `planar` | yes | `planar` (x, y, yaw on a flat floor) or `3d` (6-DoF) |
 | `base_frame` | `base_link` | yes | the frame whose pose is published |
 | `image_topic` | `/camera/image` | yes | |
@@ -244,12 +263,70 @@ as published and ignore the entries with variance 1000 in planar mode.
    should sit on the detected ones, few markers should be orange, and the
    estimator should not jump. A marker that is always orange has moved or
    was surveyed badly; "not published" lines in the log give the reason
-   (gate, position sd, fit). The check screen of the web interface (phase 5) will show the same
-   from a browser.
+   (gate, position sd, fit). The check screen of the web interface (below)
+   shows the same from a browser, with a table of how often each marker
+   agreed with the estimator's pose.
 8. **Offline.** Record the camera, `camera_info`, TF and the odometry with
    `ros2 bag record`, then play the recording into the same launch files
    with `use_sim_time:=true process_all:=true` and `ros2 bag play BAG --clock`,
    as the examples below do.
+
+## The web interface
+
+`marker_survey_web_node` serves one page (port 8090) to any browser on the
+robot's network, a phone included: printing and identifying markers, and on
+the robot the survey, the check and the use of the map. It is plain HTML,
+CSS and JavaScript shipped with the package, served by Python's standard
+HTTP server: no build step, no internet. It has no login: run it on a
+trusted network, or behind the robot project's own access control; writing
+the map needs a confirmation on the page.
+
+```bash
+ros2 launch marker_survey_web web.launch.xml map_path:=$PWD/sites/my_site/marker_map.yaml
+```
+
+next to the survey node, started with `start_paused:=true` (the page starts
+the survey and chooses its frame), and the localizer node.
+`examples/ceiling/launch/web.launch.xml site:=$PWD/sites/my_site` starts all
+three for the ceiling example. On a laptop without ROS, `marker_survey_web`
+serves the printing and identifying pages only.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `host`, `port` | `0.0.0.0`, 8090 | where the page is served; `127.0.0.1`: this computer only |
+| `survey_node`, `localizer_node` | `/marker_survey`, `/marker_localizer` | the nodes it talks to |
+| `map_path` | `''` | the map the localizer reads, which "Use the map" writes; empty: the localizer's `marker_map` when it is first heard from |
+| `camera_rate`, `camera_width` | 5.0, 640 | [Hz], [px] camera frames sent as JPEG, only while the page shows a camera |
+| `check.agree_distance`, `check.agree_angle_deg` | 0.15, 5.0 | [m], [deg] a fix this close to the estimator's pose agrees |
+| `check.min_samples`, `check.max_disagree` | 5, 0.2 | a marker is flagged when it disagrees in more than this share of at least this many fixes |
+
+What it uses: the survey node's `~/status`, `~/start`, `~/pause`, `~/reset`,
+`~/save`, `~/debug/image` and its `frame.*` parameters; the localizer's
+`~/status`, `~/fixes`, `~/reload`, `~/debug/image` and its `marker_map`
+parameter. The screens:
+
+- **Survey.** Start: "Use the robot's map" (`align_to_track` when the
+  survey has a `frame.reference_frame`, else `pose_frame`) or "Start from a
+  marker" (`origin_marker`). While driving: the camera with the detections
+  drawn, the map from above, the markers with a light each and hints. Save:
+  the solve runs on the robot and the report opens; "Drive again" adds to
+  the same recording, and the next save keeps the earlier one in
+  `history/`.
+- **Check.** The localizer on the map just surveyed (a trial: its
+  `marker_map` is pointed at the survey's file, nothing is written) or on
+  the map in use; each fix against the estimator's pose (the prior at the
+  image's stamp), the distance, and per marker how often it agreed. A marker
+  that disagrees is flagged: it moved, or it was surveyed badly.
+- **Use the map.** What changes (markers added, removed, moved), then, after
+  a confirmation, the survey's map is written to `map_path`; the file it
+  replaces is kept in `marker_map_versions/` beside it, and the localizer
+  reads the new one at once. Undo puts the newest kept version back.
+
+The JSON API (`GET /api/state`, `POST /api/survey`, `GET /api/report`,
+`GET|POST /api/map`, `GET|POST /api/check`, WebSocket `/api/live`) is
+listed in `marker_survey_web/marker_survey_web/server.py`; a robot project
+can embed the page in its own interface with a link or an iframe, and open a
+step directly (`/#survey`, `/#check`, `/#use`).
 
 ## The examples
 
@@ -258,7 +335,8 @@ as published and ignore the entries with variance 1000 in planar mode.
 | `examples/wall_course/` | wall boards (`DICT_5X5_1000`, 0.38 m) around a 10 x 4 m course; a vehicle's forward camera with visual-inertial odometry | `origin_marker` (board 10), odometry pose source | `3d`, gated against a `PoseWithCovarianceStamped` |
 | `examples/ceiling/` | ceiling markers (tag36h11, 0.45 m at 3 m) in an office; an indoor robot's upward webcam, wheel odometry, a LiDAR localizer | `align_to_track` against the LiDAR localizer's `map -> base_link`, TF pose source | `planar`, gated against robot_localization's `Odometry` |
 
-Each holds `launch/survey.launch.xml`, `launch/localizer.launch.xml` and
+Each holds `launch/survey.launch.xml`, `launch/localizer.launch.xml` (the
+ceiling example also `launch/web.launch.xml`, which starts both with the web interface) and
 `sites/<site>/marker_map.yaml` with a `route.csv` (the path of the simulated
 drive), laid out as a robot project would. The launch files' defaults are a
 real robot's topics; for the simulated recording the commands below pass

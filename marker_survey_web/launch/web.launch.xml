@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!--
+  The web interface on the robot. Start the survey node with start_paused:=true
+  (the page starts it) and the localizer node beside it; then open
+  http://<the robot's address>:8090/ on any device on the robot's network.
+
+    ros2 launch marker_survey_web web.launch.xml map_path:=$PWD/sites/my_site/marker_map.yaml
+
+  map_path is the file the localizer reads: "Use the map" writes it there,
+  keeps the previous one in marker_map_versions/ beside it, and tells the
+  localizer to read it again. No login: run it on a trusted network, or behind
+  the robot's own access control.
+-->
+<launch>
+  <arg name="map_path" default="" description="the map the localizer reads; empty: the localizer's marker_map"/>
+  <arg name="host" default="0.0.0.0" description="127.0.0.1: this computer only"/>
+  <arg name="port" default="8090"/>
+  <arg name="survey_node" default="/marker_survey"/>
+  <arg name="localizer_node" default="/marker_localizer"/>
+  <arg name="camera_rate" default="5.0" description="[Hz] camera frames sent to a page that shows them"/>
+  <arg name="use_sim_time" default="false"/>
+
+  <node pkg="marker_survey_web" exec="marker_survey_web_node" name="marker_survey_web" output="screen">
+    <param name="map_path" value="$(var map_path)"/>
+    <param name="host" value="$(var host)"/>
+    <param name="port" value="$(var port)"/>
+    <param name="survey_node" value="$(var survey_node)"/>
+    <param name="localizer_node" value="$(var localizer_node)"/>
+    <param name="camera_rate" value="$(var camera_rate)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+</launch>
