@@ -45,7 +45,7 @@ def test_import_write_and_load_back_give_the_same_poses_and_comments(name, keep_
     back = mm.load(str(path))
     assert sorted(back.ids()) == sorted(want)
     for mid, T in want.items():
-        assert np.abs(back.pose_of(mid) - T).max() < 1e-6, mid
+        assert np.abs(back.pose_of(mid) - T).max() < map_import.POSE_TOLERANCE, mid
     written = path.read_text()
     for c in source_comments(text, header=keep_header):
         assert c in written, c
@@ -62,7 +62,7 @@ def test_the_wall_course_keeps_heights_and_tilts():
     m = SITES['test_course'][2](source_text('test_course'))
     assert m.mount == 'wall' and m.marker_size == 0.25 and m.dictionary == 'DICT_5X5_1000'
     assert m.get(0).z == 0.25 and m.get(9).z == 0.30
-    assert m.get(9).angles['lean_deg'] == pytest.approx(np.degrees(0.035))
+    assert m.get(9).angles['lean_deg'] == 2.01       # 0.035 rad, 2.005 deg
     assert m.get(10).comment == 'by the start'
     assert m.get(0).comment_above == ['end walls, seen in the turns']
 
@@ -70,9 +70,20 @@ def test_the_wall_course_keeps_heights_and_tilts():
 def test_the_office_is_a_ceiling_map():
     m = importers.from_ceiling_list(source_text('office'))
     assert (m.mount, m.dictionary, m.marker_size) == ('ceiling', 'tag36h11', 0.45)
-    assert m.get(1).angles['rotation_deg'] == pytest.approx(45.836624, abs=1e-6)
+    assert m.get(1).angles['rotation_deg'] == 45.84     # 0.8 rad
     assert m.get(3).comment == 'above the printer'
     assert m.get(8).comment_above == ['by the door']
+
+
+def test_imported_angles_are_rounded_within_the_source_precision(tmp_path):
+    assert [importers._deg(r) for r in (0.5236, 2.3562, 3.1416, -1.0472, -0.7854, 0.0)] == \
+        [30.0, 135.0, 180.0, -60.0, -45.0, 0.0]
+    assert importers._deg(-0.02) == -1.15            # -1.1459 deg, two decimals at most
+    assert importers._deg(0.123456789) == pytest.approx(7.0735530, abs=1e-6)   # precise: kept
+    path = tmp_path / 'marker_map.yaml'
+    mm.write(SITES['test_course'][2](source_text('test_course')), str(path))
+    text = path.read_text()
+    assert 'facing_deg: 135.0' in text and '135.000' not in text and '120.0' in text
 
 
 def test_a_course_without_a_dictionary_needs_one():

@@ -25,6 +25,9 @@ Two source formats, both lists of markers with angles in radians:
   yaw rotates the marker about the vertical; at yaw 0 its image x axis
   points along +x and it faces down (ceiling_marker_axes() below).
 
+Angles are converted to degrees and rounded within the source's precision
+(at most ANGLE_ROUNDING_DEG): 0.5236 rad becomes 30.0, not 30.00007.
+
 Comments next to markers are carried over: comment lines above a marker and
 the comment at the end of a marker's line. The file's header and footer
 comments (often about the source's own use: routes, tape marks) are replaced
@@ -91,6 +94,25 @@ def _number(m: dict, k: str, source: str, default: Optional[float] = None) -> fl
     return float(v)
 
 
+def _deg(rad: float) -> float:
+    """Degrees of a source angle in radians, as round as the source's own precision
+    allows: 0.5236 rad is 30.0 deg, not 30.00007. The value is rounded to the fewest
+    decimals (0, 1 or 2) that stay within half a unit of the source's last digit and
+    within ANGLE_ROUNDING_DEG."""
+    deg = math.degrees(rad)
+    text = repr(abs(float(rad)))
+    digits = len(text.split('.')[1]) if '.' in text and 'e' not in text else 15
+    tol = min(math.degrees(0.5 * 10.0 ** -digits), ANGLE_ROUNDING_DEG)
+    for n in (0, 1, 2):
+        r = round(deg, n)
+        if abs(r - deg) <= tol + 1e-12:
+            return r + 0.0          # no -0.0
+    return deg
+
+
+ANGLE_ROUNDING_DEG = 0.005   # the most an imported angle moves by rounding
+
+
 def _finish(markers, comments, dictionary, size, frame_id, mount, source,
             keep_header) -> mm.MarkerMap:
     for mk in markers:
@@ -119,8 +141,7 @@ def from_course(text: str, source: str = '<course>', dictionary: Optional[str] =
     markers = []
     for m in d['markers']:
         yaw, pitch, roll = (_number(m, k, source, 0.0) for k in ('yaw', 'pitch', 'roll'))
-        angles = {'facing_deg': math.degrees(yaw), 'lean_deg': math.degrees(pitch),
-                  'turn_deg': math.degrees(roll)}
+        angles = {'facing_deg': _deg(yaw), 'lean_deg': _deg(pitch), 'turn_deg': _deg(roll)}
         markers.append(mm.MapMarker(int(m['id']), _number(m, 'x', source), _number(m, 'y', source),
                                     _number(m, 'z', source, height), 'wall', angles))
     return _finish(markers, comments, dic, size, frame_id, 'wall', source, keep_header)
@@ -138,7 +159,7 @@ def from_ceiling_list(text: str, source: str = '<markers>', frame_id: str = 'map
     for m in d['markers']:
         markers.append(mm.MapMarker(int(m['id']), _number(m, 'x', source), _number(m, 'y', source),
                                     _number(m, 'z', source), 'ceiling',
-                                    {'rotation_deg': math.degrees(_number(m, 'yaw', source, 0.0))}))
+                                    {'rotation_deg': _deg(_number(m, 'yaw', source, 0.0))}))
     return _finish(markers, comments, dic, size, frame_id, 'ceiling', source, keep_header)
 
 

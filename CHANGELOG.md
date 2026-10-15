@@ -82,6 +82,10 @@ browser (phase 5).
   source's header and footer comments (about its own use: routes, tape
   marks) are replaced by one line naming the source. `--keep-header`
   copies them as before.
+- `marker_map_import` rounds the angles it converts from radians within
+  the source's own precision, by at most 0.005 deg: 0.5236 rad is
+  `facing_deg: 30.0`, no longer 30.00007. Its check against the source
+  poses allows that rounding.
 
 ## 0.1.0 (2026-10-15)
 

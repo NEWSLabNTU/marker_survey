@@ -43,8 +43,13 @@ def main(argv=None):
     want = importers.source_poses('course' if args.kind == 'course' else 'ceiling', text)
     worst = max(float(np.abs(back.pose_of(i) - T).max()) for i, T in want.items())
     print(f'wrote {args.output}: {len(back.markers)} markers; largest difference from the '
-          f'source pose {worst:.1e}')
-    return 0 if worst < 1e-6 else 1
+          f'source pose {worst:.1e} (angles rounded by at most '
+          f'{importers.ANGLE_ROUNDING_DEG} deg)')
+    return 0 if worst < POSE_TOLERANCE else 1
+
+
+# the rounding of the angles, as a rotation matrix element, and a margin
+POSE_TOLERANCE = 2e-4
 
 
 if __name__ == '__main__':
