@@ -89,6 +89,12 @@ browser (phase 5).
   the map's pose. `~/fixes` carries the same per marker
   (`core/check.py marker_views`). The package now depends on
   `diagnostic_msgs`.
+- `localizer.launch.xml`: arguments `prior_tolerance`, `require_prior`,
+  `max_distance`, `max_position_sd`, `min_sd`, `min_sd_deg`, and
+  `param_file` (a YAML file of node parameters, read after the arguments,
+  so its values win; default `config/no_params.yaml`, which sets none).
+  `survey.launch.xml` takes `param_file` too. A robot project can include
+  the stock launch files instead of starting the nodes itself.
 - `marker_map_import` rounds the angles it converts from radians within
   the source's own precision, by at most 0.005 deg: 0.5236 rad is
   `facing_deg: 30.0`, no longer 30.00007. Its check against the source

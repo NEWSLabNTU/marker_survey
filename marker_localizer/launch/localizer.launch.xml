@@ -8,6 +8,10 @@
 
   For a recorded bag: use_sim_time:=true process_all:=true, then ros2 bag play BAG clock.
   Switch fixes off and on: ros2 param set /marker_localizer enabled false
+
+  param_file: a YAML file of the node's parameters (/**: ros__parameters: ...),
+  read after the arguments below, so its values win over them; any parameter
+  of the node can be set there (docs/integration.md lists them).
 -->
 <launch>
   <arg name="marker_map" description="the site's marker_map.yaml"/>
@@ -24,9 +28,17 @@
   <arg name="roll_pitch" default="zero" description="planar: the robot's roll and pitch from zero, tf or imu"/>
   <arg name="roll_pitch_frame" default="" description="roll_pitch tf: a level frame, such as odom"/>
   <arg name="imu_topic" default="/imu"/>
+  <arg name="prior_tolerance" default="0.5" description="[s] the prior pose nearest an image, within this, counts"/>
+  <arg name="require_prior" default="false" description="with prior_topic: publish no fix without a prior near its stamp"/>
+  <arg name="max_distance" default="0.0" description="[m] leave out markers estimated farther than this; 0: no limit"/>
+  <arg name="max_position_sd" default="0.25" description="[m] publish no fix with a larger position sd; 0: no limit"/>
+  <arg name="min_sd" default="0.01" description="[m] added to the fix's position sd (the map's own error)"/>
+  <arg name="min_sd_deg" default="0.3" description="[deg] added to the fix's angle sd"/>
   <arg name="detect_scale" default="1.0" description="under 1: find markers in a downscaled image (large cameras)"/>
   <arg name="process_all" default="false" description="every frame in order, over a reliable subscription (recordings)"/>
   <arg name="use_sim_time" default="false"/>
+  <arg name="param_file" default="$(find-pkg-share marker_localizer)/config/no_params.yaml"
+       description="YAML of node parameters, read last: its values win over the arguments"/>
 
   <node pkg="marker_localizer" exec="marker_localizer" name="marker_localizer" output="screen">
     <param name="marker_map" value="$(var marker_map)"/>
@@ -43,8 +55,15 @@
     <param name="roll_pitch" value="$(var roll_pitch)"/>
     <param name="roll_pitch_frame" value="$(var roll_pitch_frame)"/>
     <param name="imu_topic" value="$(var imu_topic)"/>
+    <param name="prior_tolerance" value="$(var prior_tolerance)"/>
+    <param name="require_prior" value="$(var require_prior)"/>
+    <param name="max_distance" value="$(var max_distance)"/>
+    <param name="max_position_sd" value="$(var max_position_sd)"/>
+    <param name="min_sd" value="$(var min_sd)"/>
+    <param name="min_sd_deg" value="$(var min_sd_deg)"/>
     <param name="detect_scale" value="$(var detect_scale)"/>
     <param name="process_all" value="$(var process_all)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param from="$(var param_file)"/>
   </node>
 </launch>

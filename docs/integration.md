@@ -156,7 +156,13 @@ the change is refused if it does not load. A map file that does not exist
 when the node starts is waited for (a new site): the node publishes nothing
 until `~/reload` or a new `marker_map` finds one.
 
-Parameters (`marker_localizer/marker_localizer/params.py`):
+Parameters (`marker_localizer/marker_localizer/params.py`; the launch file
+passes the ones marked with an argument of the same name, and any of them
+from a YAML file, `param_file:=my_localizer.yaml`, read after the arguments
+so its values win: `/**: {ros__parameters: {max_distance: 6.0, ...}}`. A
+robot project includes the stock launch file with its own arguments or
+file instead of starting the node itself; `survey.launch.xml` takes
+`param_file` the same way):
 
 | Parameter | Default | Launch arg | Meaning |
 |---|---|---|---|
@@ -169,8 +175,8 @@ Parameters (`marker_localizer/marker_localizer/params.py`):
 | `pose_topic` | `~/pose` | yes | the output |
 | `prior_topic` | `''` | yes | the estimator's pose; empty: no gate |
 | `prior_type` | `pose` | yes | `pose` (PoseWithCovarianceStamped) or `odometry` |
-| `prior_tolerance` | 0.5 | | [s] the prior is interpolated at the image's stamp, or the nearest within this |
-| `require_prior` | false | | publish no fix while no prior is near the image's stamp |
+| `prior_tolerance` | 0.5 | yes | [s] the prior is interpolated at the image's stamp, or the nearest within this |
+| `require_prior` | false | yes | publish no fix while no prior is near the image's stamp |
 | `gate_distance` | 1.0 | yes | [m] fixes farther than this from the prior are dropped (a misread ID, a moved marker) |
 | `gate_angle_deg` | 15.0 | yes | the same for yaw |
 | `enabled` | true | | can be set at run time: `ros2 param set /marker_localizer enabled false` |
@@ -183,14 +189,14 @@ Parameters (`marker_localizer/marker_localizer/params.py`):
 | `detect_scale` | 1.0 | yes | under 1: find markers in a downscaled image, refine on the full one (0.5 for 1920 x 1200) |
 | `quad_decimate` | -1.0 | | AprilTag quad search decimation; -1: 2 from OpenCV 4.6 on, else none |
 | `min_contrast` | 30 | | AprilTag: smallest white-black difference |
-| `max_distance` | 0.0 | | [m] ignore markers farther from the camera; 0: no limit |
-| `max_position_sd` | 0.25 | | [m] a fix with a larger position sd is not published; 0: keep all |
+| `max_distance` | 0.0 | yes | [m] ignore markers farther from the camera; 0: no limit |
+| `max_position_sd` | 0.25 | yes | [m] a fix with a larger position sd is not published; 0: keep all |
 | `pixel_sd` | 0.5 | | [px] corner noise the covariance assumes (at least the fit's RMS is used) |
 | `robust_px` | 1.0 | | [px] where the robust loss turns linear |
 | `max_rms_px` | 2.0 | | a fix whose corners fit worse is dropped |
 | `outlier_px` | 3.0 | | a marker fitting worse is left out and the rest refit |
-| `min_sd` | 0.01 | | [m] added to the position variance (a floor) |
-| `min_sd_deg` | 0.3 | | added to the angle variances |
+| `min_sd` | 0.01 | yes | [m] added to the position variance (a floor) |
+| `min_sd_deg` | 0.3 | yes | added to the angle variances |
 | `tilt_sd_deg` | 0.2 | | `planar`: the robot's roll and pitch uncertainty, added to x and y at the markers' distance |
 | `base_height` | 0.0 | | `planar`: [m] `base_frame`'s height above the map's z = 0, the published z |
 | `debug_width` | 960 | | [px] width of `~/debug/image` |

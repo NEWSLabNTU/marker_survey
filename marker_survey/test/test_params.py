@@ -63,3 +63,26 @@ def test_odom_is_an_alias_of_odometry():
 def test_marker_sizes():
     assert parse_sizes(['12:0.30', ' ', '7:0.2']) == {12: 0.30, 7: 0.2}
     assert params(marker_sizes=['12:0.30']).settings.size_of(12) == 0.30
+
+
+def test_the_launch_file_passes_its_arguments_with_the_node_defaults():
+    """Every parameter survey.launch.xml sets comes from an argument with the node's
+    default (or a required one); param_file is read last."""
+    import os
+    import xml.etree.ElementTree as ET
+    path = os.path.join(os.path.dirname(__file__), '..', 'launch', 'survey.launch.xml')
+    root = ET.parse(path).getroot()
+    args = {a.get('name'): a.get('default') for a in root.iter('arg')}
+    params = [(p.get('name'), p.get('value'), p.get('from')) for p in root.find('node').iter('param')]
+    assert params[-1] == (None, None, '$(var param_file)') and 'param_file' in args
+    for name, value, _ in params[:-1]:
+        assert value.startswith('$(var ') and value.endswith(')'), name
+        arg = value[6:-1]
+        assert arg in args, name
+        if name not in PARAMETERS:
+            assert name == 'use_sim_time'
+            continue
+        default = PARAMETERS[name]
+        if args[arg] is not None and default not in ('', None):
+            want = str(default).lower() if isinstance(default, bool) else str(default)
+            assert args[arg] == want or float(args[arg]) == float(default), (name, args[arg], default)

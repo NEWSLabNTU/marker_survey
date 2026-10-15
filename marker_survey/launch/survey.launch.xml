@@ -9,6 +9,10 @@
 
   For a recorded bag: use_sim_time:=true process_all:=true, then ros2 bag play BAG clock.
   Save with Ctrl-C or: ros2 service call /marker_survey/save std_srvs/srv/Trigger
+
+  param_file: a YAML file of the node's parameters (/**: ros__parameters: ...),
+  read after the arguments below, so its values win over them; any parameter
+  of the node can be set there (docs/integration.md lists them).
 -->
 <launch>
   <arg name="output_dir" description="where marker_map.yaml, survey_report.yaml and survey_data.npz are written"/>
@@ -30,6 +34,8 @@
   <arg name="process_all" default="false" description="every frame in order, over a reliable subscription (recordings)"/>
   <arg name="start_paused" default="false" description="record only after ~/start (the web interface starts it)"/>
   <arg name="use_sim_time" default="false"/>
+  <arg name="param_file" default="$(find-pkg-share marker_survey)/config/no_params.yaml"
+       description="YAML of node parameters, read last: its values win over the arguments"/>
 
   <node pkg="marker_survey" exec="marker_survey" name="marker_survey" output="screen">
     <param name="output_dir" value="$(var output_dir)"/>
@@ -51,5 +57,6 @@
     <param name="process_all" value="$(var process_all)"/>
     <param name="start_paused" value="$(var start_paused)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param from="$(var param_file)"/>
   </node>
 </launch>

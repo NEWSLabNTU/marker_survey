@@ -1,0 +1,4 @@
+# No parameters: the default param_file of the launch files, which leaves
+# every parameter to the launch arguments and the node's defaults.
+/**:
+  ros__parameters: {}

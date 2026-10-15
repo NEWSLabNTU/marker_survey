@@ -25,3 +25,26 @@ def test_defaults_are_valid():
 def test_errors_name_the_parameter(kw, msg):
     with pytest.raises(ValueError, match=msg):
         params(**kw)
+
+
+def test_the_launch_file_passes_its_arguments_with_the_node_defaults():
+    """Every argument of localizer.launch.xml sets the parameter of its name, with the
+    node's default; param_file is read last."""
+    import os
+    import xml.etree.ElementTree as ET
+    path = os.path.join(os.path.dirname(__file__), '..', 'launch', 'localizer.launch.xml')
+    root = ET.parse(path).getroot()
+    args = {a.get('name'): a.get('default') for a in root.iter('arg')}
+    node = root.find('node')
+    params = [(p.get('name'), p.get('value'), p.get('from')) for p in node.iter('param')]
+    assert params[-1] == (None, None, '$(var param_file)')
+    for name, value, _ in params[:-1]:
+        assert value == f'$(var {name})', name
+        assert name in PARAMETERS or name == 'use_sim_time', name
+        if name in PARAMETERS and args.get(name) is not None:
+            default = PARAMETERS[name]
+            want = str(default).lower() if isinstance(default, bool) else str(default)
+            assert args[name] == want, (name, args[name], default)
+    for name in ('max_distance', 'min_sd', 'min_sd_deg', 'max_position_sd', 'require_prior',
+                 'prior_tolerance', 'param_file'):
+        assert name in args, name
