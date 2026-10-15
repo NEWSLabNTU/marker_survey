@@ -219,6 +219,25 @@ def test_no_gate_without_a_prior():
     assert not L.accepted(L.locate(dets, T_prior=f.T_map_base))
 
 
+def test_a_fix_far_from_a_wrong_prior_is_gated_and_marked_for_relocalization():
+    """A kidnapped robot: the estimate is 2 m off. The fix is right, the gate turns it
+    down, and gated() tells the node it may go to rejected_topic."""
+    m, route = site('office')
+    cam = sim.upward_camera()
+    L = Localizer(m, cam.K, cam.T_base_cam, LocalizerSettings(mode='planar'))
+    f = frames_of(route, laps=1)[40]
+    dets = sim.project(m.poses(), m.sizes(), cam, f.T_map_base @ cam.T_base_cam,
+                       np.random.default_rng(0), PIXEL_SD)
+    assert dets
+    wrong = f.T_map_base.copy()
+    wrong[0, 3] += 2.0
+    res = L.locate(dets, T_prior=wrong)
+    assert not L.accepted(res) and L.gated(res)
+    assert np.linalg.norm(res.fix.T_map_base[:2, 3] - f.T_map_base[:2, 3]) < 0.05
+    good = L.locate(dets, T_prior=f.T_map_base)
+    assert L.accepted(good) and not L.gated(good)
+
+
 def test_single_marker_ambiguity_resolved_towards_the_prior():
     """A board seen at an angle from 4 m: its two IPPE solutions reproject alike; the
     prior picks the right one."""

@@ -9,6 +9,8 @@
        nav_msgs/Odometry with prior_type odometry)
   out  pose_topic      geometry_msgs/PoseWithCovarianceStamped of base_frame in the
                        map's frame_id, stamped with the image's capture time
+       rejected_topic  (if set) the same for fixes only the gate turned down (far
+                       from the prior): for a relocalizer recovering a lost robot
        ~/debug/image   the detections and the fit's residuals (only while something
                        subscribes)
        ~/fixes         std_msgs/String, JSON per image with markers: the fix, the prior
@@ -113,6 +115,8 @@ class MarkerLocalizerNode(Node):
         if p.mode == 'planar' and p.roll_pitch == 'imu':
             self.create_subscription(Imu, p.imu_topic, self.on_imu, qos_profile_sensor_data)
         self.pub = self.create_publisher(PoseWithCovarianceStamped, p.pose_topic, 10)
+        self.pub_rejected = (self.create_publisher(PoseWithCovarianceStamped, p.rejected_topic, 10)
+                             if p.rejected_topic else None)
         self.pub_dbg = self.create_publisher(Image, '~/debug/image', 1)
         self.pub_fixes = self.create_publisher(String, '~/fixes', 50)
         self.pub_status = self.create_publisher(String, '~/status', 1)
@@ -310,6 +314,9 @@ class MarkerLocalizerNode(Node):
             self.n['fixes'] += 1
         elif res.fix is not None:
             self.n['rejected'] += 1
+            if self.pub_rejected is not None and self.localizer.gated(res):
+                self.publish(msg.header.stamp, res.fix, self.pub_rejected)
+                self.n['gated, published apart'] += 1
             self.get_logger().info(f'fix from {res.fix.ids} not published: {res.reason}',
                                    throttle_duration_sec=2.0)
         if self.pub_dbg.get_subscription_count() > 0:
@@ -324,7 +331,7 @@ class MarkerLocalizerNode(Node):
             if want_markers:
                 self.pub_markers.publish(marker_diagnostics(rec, msg.header.stamp))
 
-    def publish(self, stamp, fix):
+    def publish(self, stamp, fix, pub=None):
         out = PoseWithCovarianceStamped()
         out.header.stamp = stamp                     # the capture time, not now
         out.header.frame_id = self.map.frame_id
@@ -334,7 +341,7 @@ class MarkerLocalizerNode(Node):
         (p.orientation.x, p.orientation.y, p.orientation.z,
          p.orientation.w) = (float(v) for v in matrix_to_quat(T[:3, :3]))
         out.pose.covariance = [float(v) for v in fix.covariance.ravel()]
-        self.pub.publish(out)
+        (pub or self.pub).publish(out)
 
     def publish_status(self):
         if self.pub_status.get_subscription_count() == 0:

@@ -115,6 +115,11 @@ browser (phase 5).
   `{id: MapMarker}`): tilted markers and per-marker sizes go through, each
   corner at its own map height. The older `{id: {x, y, z, yaw}}` with one
   `marker_size` still works.
+- Localizer: parameter and launch argument `rejected_topic` (default
+  empty: off): fixes that only the gate turned down, far from the prior,
+  are published there, for a relocalizer recovering a robot whose estimate
+  is lost (kidnapped). `Localizer.gated(result)` tells them apart. Nothing
+  changes while it is empty.
 - `marker_map_import` rounds the angles it converts from radians within
   the source's own precision, by at most 0.005 deg: 0.5236 rad is
   `facing_deg: 30.0`, no longer 30.00007. Its check against the source

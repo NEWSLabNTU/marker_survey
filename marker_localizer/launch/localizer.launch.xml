@@ -21,6 +21,7 @@
   <arg name="camera_info_topic" default="/camera/camera_info"/>
   <arg name="compressed" default="false"/>
   <arg name="pose_topic" default="~/pose" description="output, geometry_msgs/PoseWithCovarianceStamped"/>
+  <arg name="rejected_topic" default="" description="if set: fixes the gate turned down (far from the prior) are published here, for relocalization"/>
   <arg name="prior_topic" default="" description="the state estimator's pose, for the gate; empty: no gate"/>
   <arg name="prior_type" default="pose" description="pose (PoseWithCovarianceStamped) or odometry (nav_msgs/Odometry)"/>
   <arg name="gate_distance" default="1.0" description="[m] fixes farther from the prior are dropped"/>
@@ -48,6 +49,7 @@
     <param name="camera_info_topic" value="$(var camera_info_topic)"/>
     <param name="compressed" value="$(var compressed)"/>
     <param name="pose_topic" value="$(var pose_topic)"/>
+    <param name="rejected_topic" value="$(var rejected_topic)"/>
     <param name="prior_topic" value="$(var prior_topic)"/>
     <param name="prior_type" value="$(var prior_type)"/>
     <param name="gate_distance" value="$(var gate_distance)"/>

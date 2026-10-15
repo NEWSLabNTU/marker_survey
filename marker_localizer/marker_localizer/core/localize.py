@@ -210,6 +210,11 @@ class Localizer:
     def accepted(self, res: Result) -> bool:
         return res.fix is not None and not res.reason
 
+    def gated(self, res: Result) -> bool:
+        """A good fix that only the gate turned down: far from the prior. What a
+        relocalizer recovering from a wrong estimate (a kidnapped robot) needs."""
+        return res.fix is not None and res.reason.startswith('gated')
+
     def gate(self, fix: Fix, T_prior: np.ndarray) -> str:
         """'' if the fix agrees with the prior pose, else why not."""
         d = fix.T_map_base[:3, 3] - T_prior[:3, 3]

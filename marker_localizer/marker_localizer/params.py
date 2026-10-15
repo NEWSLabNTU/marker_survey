@@ -20,6 +20,7 @@ class LocalizerParams:
         self.camera_info_topic = str(get('camera_info_topic'))
         self.compressed = bool(get('compressed'))
         self.pose_topic = str(get('pose_topic'))
+        self.rejected_topic = str(get('rejected_topic'))
         self.prior_topic = str(get('prior_topic'))
         self.prior_type = str(get('prior_type'))
         if self.prior_type not in PRIOR_TYPES:
@@ -60,6 +61,7 @@ PARAMETERS = {
     'camera_info_topic': '/camera/camera_info',
     'compressed': False,
     'pose_topic': '~/pose',
+    'rejected_topic': '',
     'prior_topic': '',
     'prior_type': 'pose',
     'prior_tolerance': 0.5,

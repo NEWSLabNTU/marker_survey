@@ -137,6 +137,7 @@ ros2 launch marker_localizer localizer.launch.xml marker_map:=$PWD/sites/my_site
 | `~/debug/image` (out) | `sensor_msgs/Image` | markers used (green, map corners projected with the fix as dots, residual written), left out (orange), unusable (red), not in the map (grey), and the fix; only while subscribed |
 | `~/fixes` (out) | `std_msgs/String` | JSON per image with markers, only while subscribed: the fix (or why none), the prior at its stamp, the distance between them, and per marker in view what became of it and its check (below) (`marker_localizer/core/check.py`) |
 | `~/markers` (out) | `diagnostic_msgs/DiagnosticArray` | per image with markers, only while subscribed: one status per marker in view, `marker_localizer: marker <id>`, level WARN when left out as an outlier, else OK; values below |
+| `rejected_topic` (out, only if set) | `geometry_msgs/PoseWithCovarianceStamped` | the fixes the gate turned down, for relocalization; never fused by the estimator |
 | `~/status` (out) | `std_msgs/String` | JSON every second, only while subscribed: the map file in use, its markers, the counts |
 | `~/reload` (service) | `std_srvs/Trigger` | read the map file again; a file that does not load is refused and the old map stays |
 
@@ -175,6 +176,7 @@ file instead of starting the node itself; `survey.launch.xml` takes
 | `compressed` | false | yes | subscribe to `image_topic/compressed` |
 | `pose_topic` | `~/pose` | yes | the output |
 | `prior_topic` | `''` | yes | the estimator's pose; empty: no gate |
+| `rejected_topic` | `''` | yes | if set, fixes that only the gate turned down (farther from the prior than `gate_distance` or `gate_angle_deg`) are published here, `PoseWithCovarianceStamped` as `pose_topic`: for a relocalizer recovering a robot whose estimate is lost; empty: not published |
 | `prior_type` | `pose` | yes | `pose` (PoseWithCovarianceStamped) or `odometry` |
 | `prior_tolerance` | 0.5 | yes | [s] the prior is interpolated at the image's stamp, or the nearest within this |
 | `require_prior` | false | yes | publish no fix while no prior is near the image's stamp |
