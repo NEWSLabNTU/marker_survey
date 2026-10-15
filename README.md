@@ -18,9 +18,9 @@ Both share the detection, the survey (a bundle adjustment of every marker
 and camera pose), the marker map file and the localizer core. A robot adds
 only its launch file and the remapping into its own state estimator.
 
-Status: phases 0 and 1 of [ROADMAP.md](ROADMAP.md) are done (the survey,
-its tools and CI; the marker map file); the ceiling survey (phase 2) is in
-progress, the localizer and the web interface come after.
+Status: phases 0 to 2 of [ROADMAP.md](ROADMAP.md) are done: the survey for
+wall boards and ceiling markers, in three frame modes, the marker map file,
+the tools and CI. The localizer and the web interface come next.
 
 ## Packages
 
@@ -63,7 +63,10 @@ ros2 service call /marker_survey/save std_srvs/srv/Trigger
 ros2 run marker_survey marker_survey_compare /tmp/demo/result/marker_map.yaml /tmp/demo/truth_origin.yaml
 ```
 
-`ci/synthetic_survey.sh wall` does all of this in one go.
+`ci/synthetic_survey.sh wall` does all of this in one go, and
+`ci/synthetic_survey.sh ceiling_align` (or `ceiling_pose_frame`,
+`ceiling_uneven`) the same for nine ceiling markers seen by an upward
+webcam, with a noisy localizer pose as the reference.
 
 ## Surveying a site
 
@@ -92,16 +95,36 @@ ros2 run marker_survey marker_survey_compare /tmp/demo/result/marker_map.yaml /t
 The image may be rectified, or raw with distortion coefficients in its
 camera_info (the corners are then undistorted).
 
-### Frame and pose source
+### Frame modes
 
-`frame.mode: origin_marker` puts the origin on the floor below a chosen
-marker (`frame.origin_marker`), x the way it faces, z up (the floor normal,
-from the `base_frame` poses).
+| `frame.mode` | Result frame | For |
+|---|---|---|
+| `origin_marker` | origin on the floor below a chosen marker (`frame.origin_marker`), x the way it faces, z up | a site with no other map (wall courses) |
+| `pose_frame` | the pose source's own frame, such as `map` while a LiDAR localizer runs; every keyframe's pose is a prior weighted by `pose_sd` [m] and `pose_sd_deg` | markers that must agree with an existing map (places, zones, docks are in it) |
+| `align_to_track` | survey in the odometry frame, then a rigid fit (Umeyama, no scale) of the solved trajectory to a reference trajectory at the same stamps: TF `frame.reference_frame -> base_frame`, the localizer's poses | the same, without the localizer's jumps inside the solve |
+
+The floor normal (z up) comes from the `base_frame` poses in every mode, so
+an upward camera needs nothing special; `floor_offset` moves the floor below
+`base_frame` (a vehicle on a stand). In `align_to_track` the report gives
+the fit's residual (`frame.fit_rms_m`, `fit_max_m`): about the localizer's
+own noise when all is well.
+
+### Pose sources
 
 - `pose_source: odometry`: a `nav_msgs/Odometry` topic (`odom_topic`):
-  visual-inertial, wheel or IMU odometry; `odom_drift` is its translation
-  error per metre.
-- `pose_source: tf`: TF `pose_frame -> camera optical frame`.
+  visual-inertial, wheel or IMU odometry; its motion between keyframes is a
+  factor weighted by `odom_drift` (translation error per metre).
+- `pose_source: tf`: TF `pose_frame -> camera optical frame`, any frame,
+  any camera direction.
+
+### Detection
+
+One detector for ArUco and AprilTag families on OpenCV 4.5 to 4.10.
+AprilTag families use `CORNER_REFINE_APRILTAG` (OpenCV 4.6 needs it to
+decode tag36h11); every family then gets `cornerSubPix` with a window of half
+a cell and a line fit to each edge of the black square, which removes the
+0.15 to 0.2 px inward bias of the corners. Markers touching the image border
+(`border_margin_px`) or under `min_marker_px` are not used.
 
 ## The marker map file
 
@@ -170,10 +193,18 @@ Each runs as `ros2 run marker_survey <command>`; `--help` lists the options.
 
 ## Accuracy
 
-| Test | Marker position (3D) |
-|---|---|
-| wall course, rendered recording through the node (11 boards of 0.38 m, forward camera 960 x 600, one lap at 3 Hz, odometry drift 1 %) | median 0.8 cm, max 1.4 cm (Humble and Jazzy) |
-| the same course, corner-level simulation, 0.48 m boards, 1920 x 1200, two laps | median 0.4 cm, max 0.5 cm |
+Rendered recordings played through the survey node (`ci/synthetic_survey.sh`,
+marker position error in 3D; the same numbers on Humble and Jazzy):
+
+| Scene | Frame mode | Target | Result |
+|---|---|---|---|
+| 11 wall boards of 0.38 m, 10 x 4 m oval, forward camera 960 x 600 at 102 deg, one lap at 3 Hz, odometry drift 1 % | `origin_marker` | median 1 cm, max 4 cm | median 0.9 cm, max 1.5 cm |
+| 9 ceiling tags of 0.45 m at 3 m, office routes (2 laps, 92 m), upward camera 640 x 480 at 70 deg, map pose noise 6 cm per axis and 1 deg | `pose_frame` | median under 4 cm | median 0.7 cm, max 1.0 cm |
+| the same | `align_to_track` | median under 2 cm | median 0.6 cm, max 1.2 cm |
+| uneven ceiling (2.8 to 3.4 m), tags tilted 6 and 4 deg | `align_to_track` | heights within 2 cm, tilts within 1 deg | heights within 0.7 cm, tilts within 0.12 deg |
+
+Corner-level simulations of the same scenes run as unit tests
+(`test/test_scenes.py`). Not yet measured on a real site (phase 6).
 
 ## Development
 
@@ -184,7 +215,7 @@ python3 ci/check_words.py --commits  # neutral wording
 ```
 
 CI (GitHub Actions) builds and tests on `ros:humble` and `ros:jazzy`, runs
-the rendered survey through the node, and checks the wording.
+the four rendered surveys through the node, and checks the wording.
 
 ## Licence
 
