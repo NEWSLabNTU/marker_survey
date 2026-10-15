@@ -49,3 +49,8 @@ def test_the_launch_file_passes_its_arguments_with_the_node_defaults():
     for name in ('max_distance', 'min_sd', 'min_sd_deg', 'max_position_sd', 'require_prior',
                  'prior_tolerance', 'param_file', 'gate_sigmas', 'node_name'):
         assert name in args, name
+
+
+def test_debug_image_topic():
+    assert params().debug_image_topic == '~/debug/image'
+    assert params(debug_image_topic='/ceiling_camera/markers').debug_image_topic == '/ceiling_camera/markers'

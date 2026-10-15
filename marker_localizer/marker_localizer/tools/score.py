@@ -7,6 +7,11 @@ every fix. Every fix must carry exactly the stamp of the image it came from
 (the capture time); a stamp that matches no image fails the check.
 
     marker_localizer_score OUT/poses OUT/truth_poses.csv --mode planar --max-mean-cm 1 --max-cm 3
+
+--gap T0 T1 (stamps, s): no fix may carry a stamp between them (the camera
+looked away from the markers: a fix there is a false one), and the first fix
+after T1 is reported with its error and its delay; --max-first-cm limits that
+error (the localizer, with no prior, must land at once where the camera is).
 """
 
 import argparse
@@ -69,6 +74,29 @@ def score(poses, truth, mode):
     return rows, unmatched
 
 
+def gap_check(rows, t0, t1, max_first_cm=None, fail=None):
+    """Lines describing the fixes around a gap [t0, t1] (stamps, s) in which none may
+    be published; failures are appended to `fail`."""
+    fail = [] if fail is None else fail
+    out = []
+    inside = [r for r in rows if t0 <= float(r['stamp']) <= t1]
+    out.append(f'gap {t0:.3f} to {t1:.3f} s ({t1 - t0:.1f} s): {len(inside)} fixes in it')
+    if inside:
+        fail.append(f'{len(inside)} fixes inside the gap (first {inside[0]["stamp"]})')
+    after = sorted((r for r in rows if float(r['stamp']) > t1), key=lambda r: float(r['stamp']))
+    if not after:
+        fail.append('no fix after the gap')
+        return out
+    r = after[0]
+    last = max((float(x['stamp']) for x in rows if float(x['stamp']) < t0), default=None)
+    out.append(f'first fix after the gap: {float(r["stamp"]) - t1:.2f} s after it, error '
+               f'{100 * r["err"]:.2f} cm'
+               + (f'; the last before it {t0 - last:.2f} s before it' if last is not None else ''))
+    if max_first_cm is not None and 100 * r['err'] > max_first_cm:
+        fail.append(f'first fix after the gap {100 * r["err"]:.2f} cm off, over {max_first_cm}')
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('bag', help='rosbag2 recording of the output topic')
@@ -81,6 +109,10 @@ def main(argv=None):
     ap.add_argument('--max-mean-cm', type=float)
     ap.add_argument('--max-cm', type=float)
     ap.add_argument('--max-yaw-deg', type=float)
+    ap.add_argument('--gap', type=float, nargs=2, metavar=('T0', 'T1'),
+                    help='[s] stamps between which no fix may be published')
+    ap.add_argument('--max-first-cm', type=float,
+                    help='with --gap: the largest error of the first fix after it')
     a = ap.parse_args(argv)
     truth = load_truth(a.truth)
     poses = read_poses(a.bag, a.topic)
@@ -109,6 +141,9 @@ def main(argv=None):
             fail.append(f'max {e.max():.2f} cm over {a.max_cm}')
         if a.max_yaw_deg is not None and yaw > a.max_yaw_deg:
             fail.append(f'yaw {yaw:.2f} deg over {a.max_yaw_deg}')
+    if a.gap:
+        for line in gap_check(rows, a.gap[0], a.gap[1], a.max_first_cm, fail):
+            print(line)
     for f in fail:
         print(f'FAIL: {f}')
     return 1 if fail else 0

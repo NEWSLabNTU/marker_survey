@@ -2,7 +2,8 @@
 
   in   image (raw or compressed) and its camera_info (rectified, or with distortion
        coefficients: the corners are then undistorted)
-       TF base_frame -> the image's frame: the camera's mounting
+       TF base_frame -> the image's frame: the camera's mounting (base_frame empty or
+       the image's frame: the camera is the base, a handheld camera)
        mode planar: the robot's roll and pitch (roll_pitch: zero, tf or imu)
        prior_topic (optional): the state estimator's pose, for the gate and the
        single-marker ambiguity (geometry_msgs/PoseWithCovarianceStamped, or
@@ -12,7 +13,7 @@
        rejected_topic  (if set) the same for fixes only the gate turned down (far
                        from the prior): for a relocalizer recovering a lost robot
        ~/debug/image   the detections and the fit's residuals (only while something
-                       subscribes)
+                       subscribes); the topic is debug_image_topic
        ~/fixes         std_msgs/String, JSON per image with markers: the fix, the prior
                        at its stamp, the distance, each marker's use and check
                        (core/check.py);
@@ -22,7 +23,13 @@
                        pose as the image sees it against the map's (core/check.py
                        marker_views, diagnostics.py); only while something subscribes
        ~/status        std_msgs/String, JSON every second: the map in use, its
-                       markers, the counts; only while something subscribes
+                       markers, the counts, last_fix_age (seconds since the last
+                       published fix's stamp, by the node's clock; null before
+                       the first); only while something subscribes
+       ~/map_markers   visualization_msgs/MarkerArray, latched (transient local):
+                       every marker of the loaded map as a thin cube of its size
+                       and a text label with its id, in the map's frame_id;
+                       published again when the map is (re)loaded
   services
        ~/reload        std_srvs/Trigger: read the map file again
 
@@ -43,6 +50,7 @@ import os
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray
+from visualization_msgs.msg import Marker, MarkerArray
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -50,7 +58,7 @@ from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image, Imu
 from std_msgs.msg import String
@@ -85,6 +93,11 @@ class MarkerLocalizerNode(Node):
         self.map_path = p.marker_map
         self.map_loaded = None
         self.localizer = None
+        self.last_fix = None            # stamp [s] of the last published fix
+        self.pub_map = self.create_publisher(
+            MarkerArray, '~/map_markers',
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL))
         if os.path.exists(p.marker_map):
             self.load_map(p.marker_map)
         else:
@@ -117,7 +130,7 @@ class MarkerLocalizerNode(Node):
         self.pub = self.create_publisher(PoseWithCovarianceStamped, p.pose_topic, 10)
         self.pub_rejected = (self.create_publisher(PoseWithCovarianceStamped, p.rejected_topic, 10)
                              if p.rejected_topic else None)
-        self.pub_dbg = self.create_publisher(Image, '~/debug/image', 1)
+        self.pub_dbg = self.create_publisher(Image, p.debug_image_topic, 1)
         self.pub_fixes = self.create_publisher(String, '~/fixes', 50)
         self.pub_status = self.create_publisher(String, '~/status', 1)
         self.pub_markers = self.create_publisher(DiagnosticArray, '~/markers', 10)
@@ -152,7 +165,35 @@ class MarkerLocalizerNode(Node):
         self.map, self.map_path = new, path
         self.map_loaded = time.time()
         self.localizer = None                       # rebuilt with the new map on the next image
+        self.publish_map()
         return new
+
+    def publish_map(self):
+        """The loaded map on ~/map_markers: a thin cube per marker and its id; the
+        markers of a previous map are deleted first."""
+        arr = MarkerArray(markers=[Marker(action=Marker.DELETEALL)])
+        arr.markers[0].header.frame_id = self.map.frame_id
+        for k, m in enumerate(self.map.markers):
+            T = m.pose()
+            size = self.map.size_of(m.id)
+            q = matrix_to_quat(T[:3, :3])
+            box = Marker(type=Marker.CUBE, action=Marker.ADD, id=2 * k, ns='marker')
+            box.header.frame_id = self.map.frame_id
+            box.pose.position.x, box.pose.position.y, box.pose.position.z = (float(v) for v in T[:3, 3])
+            (box.pose.orientation.x, box.pose.orientation.y, box.pose.orientation.z,
+             box.pose.orientation.w) = (float(v) for v in q)
+            box.scale.x, box.scale.y, box.scale.z = size, size, 0.01
+            box.color.r, box.color.g, box.color.b, box.color.a = 0.1, 0.4, 1.0, 0.8
+            txt = Marker(type=Marker.TEXT_VIEW_FACING, action=Marker.ADD, id=2 * k + 1, ns='id')
+            txt.header.frame_id = self.map.frame_id
+            pos = T[:3, 3] + T[:3, 2] * 0.05            # just in front of its face
+            txt.pose.position.x, txt.pose.position.y, txt.pose.position.z = (float(v) for v in pos)
+            txt.pose.orientation.w = 1.0
+            txt.scale.z = max(0.1, 0.5 * size)
+            txt.color.r = txt.color.g = txt.color.b = txt.color.a = 1.0
+            txt.text = str(m.id)
+            arr.markers += [box, txt]
+        self.pub_map.publish(arr)
 
     def on_reload(self, request, response):
         try:
@@ -277,7 +318,10 @@ class MarkerLocalizerNode(Node):
         if not self.enabled or self.K is None or self.map is None:
             return
         if self.localizer is None:
-            T = self.lookup(self.p.base_frame, msg.header.frame_id, 0.0)
+            if self.p.base_frame in ('', msg.header.frame_id):
+                T = np.eye(4)                       # the camera is the base (handheld)
+            else:
+                T = self.lookup(self.p.base_frame, msg.header.frame_id, 0.0)
             if T is None:
                 self.get_logger().info(f'waiting for TF {self.p.base_frame} -> {msg.header.frame_id}',
                                        throttle_duration_sec=5.0)
@@ -319,6 +363,7 @@ class MarkerLocalizerNode(Node):
         if publish:
             self.publish(msg.header.stamp, res.fix)
             self.n['fixes'] += 1
+            self.last_fix = t
         elif res.fix is not None:
             self.n['rejected'] += 1
             if self.pub_rejected is not None and self.localizer.gated(res):
@@ -354,7 +399,11 @@ class MarkerLocalizerNode(Node):
         if self.pub_status.get_subscription_count() == 0:
             return
         m = self.map
+        age = None
+        if self.last_fix is not None:
+            age = round(max(0.0, self.get_clock().now().nanoseconds * 1e-9 - self.last_fix), 2)
         st = {'map': self.map_path, 'loaded': self.map_loaded, 'mode': self.p.mode,
+              'last_fix_age': age,
               'enabled': self.enabled, 'camera': self.K is not None,
               'prior_topic': self.p.prior_topic, 'counts': dict(self.n),
               'frame_id': None if m is None else m.frame_id,

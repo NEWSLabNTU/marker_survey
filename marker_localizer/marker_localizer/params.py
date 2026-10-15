@@ -42,6 +42,7 @@ class LocalizerParams:
         self.quad_decimate = float(get('quad_decimate'))
         self.min_contrast = int(get('min_contrast'))
         self.debug_width = int(get('debug_width'))
+        self.debug_image_topic = str(get('debug_image_topic')) or '~/debug/image'
         self.settings = LocalizerSettings(
             mode=self.mode, pixel_sd=float(get('pixel_sd')), robust_px=float(get('robust_px')),
             max_rms_px=float(get('max_rms_px')), outlier_px=float(get('outlier_px')),
@@ -90,4 +91,5 @@ PARAMETERS = {
     'tilt_sd_deg': 0.2,
     'base_height': 0.0,
     'debug_width': 960,
+    'debug_image_topic': '~/debug/image',
 }

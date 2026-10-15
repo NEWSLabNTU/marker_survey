@@ -17,7 +17,7 @@
   <arg name="marker_map" description="the site's marker_map.yaml"/>
   <arg name="node_name" default="marker_localizer" description="the node's name; its ~/ topics and services follow it"/>
   <arg name="mode" default="planar" description="planar (x, y, yaw on a flat floor) or 3d (6-DoF)"/>
-  <arg name="base_frame" default="base_link"/>
+  <arg name="base_frame" default="base_link" description="the frame whose pose is published; the camera's own frame (or empty) for a handheld camera"/>
   <arg name="image_topic" default="/camera/image"/>
   <arg name="camera_info_topic" default="/camera/camera_info"/>
   <arg name="compressed" default="false"/>
@@ -38,6 +38,7 @@
   <arg name="min_sd" default="0.01" description="[m] added to the fix's position sd (the map's own error)"/>
   <arg name="min_sd_deg" default="0.3" description="[deg] added to the fix's angle sd"/>
   <arg name="detect_scale" default="1.0" description="under 1: find markers in a downscaled image (large cameras)"/>
+  <arg name="debug_image_topic" default="~/debug/image" description="the image with the detections drawn (published only while something subscribes)"/>
   <arg name="process_all" default="false" description="every frame in order, over a reliable subscription (recordings)"/>
   <arg name="use_sim_time" default="false"/>
   <arg name="param_file" default="$(find-pkg-share marker_localizer)/config/no_params.yaml"
@@ -67,6 +68,7 @@
     <param name="min_sd" value="$(var min_sd)"/>
     <param name="min_sd_deg" value="$(var min_sd_deg)"/>
     <param name="detect_scale" value="$(var detect_scale)"/>
+    <param name="debug_image_topic" value="$(var debug_image_topic)"/>
     <param name="process_all" value="$(var process_all)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param from="$(var param_file)"/>
