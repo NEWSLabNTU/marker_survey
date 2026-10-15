@@ -11,9 +11,19 @@ robot's speed and the exposure time (motion blur), and the odometry drift.
 - Largest marker that fits in view at any heading: (view height - 2 borders) / sqrt(2).
 - Zone radius R: within R of a marker, the camera sees all of it at any heading.
 - Spacing: a marker always in view on a square grid, D <= sqrt(2) R; along a
-  route with odometry in between, D <= 2 R + max_drift_error / drift.
+  route with odometry in between, D <= 2 R + max_drift_error / drift; along a
+  route with no odometry (a handheld camera, the survey's pose_source markers),
+  D <= 2 R: one marker always fully in view, and two at the midpoint, which is
+  how each new marker gets linked to the mapped ones.
+- Along a route the image can be held with its long side along the way (a
+  handheld camera turned on its axis): there the zone reaches R_long =
+  (view width - 2 borders - S sqrt(2)) / 2, so two markers of a row stay in view
+  together over 2 R_long - D of the way, a margin for a shaking hand.
+- Markers for a route of length L at spacing D: ceil(L / D) + 1 (one at each
+  end).
 """
 import math
+from typing import Optional
 
 CELLS = 8          # tag36h11: 6 x 6 data cells plus a 1-cell black border
 SHEET_FACTOR = 1.25  # printed width / black square: a 1-cell white margin each side
@@ -52,9 +62,18 @@ def recommend(p, size=None):
     if size is None:
         size = min(math.ceil(SAFETY * p['s_min'] * 20) / 20, p['s_max'])
     r = zone_radius(p, size)
+    r_long = (p['view_w'] - 2 * p['border'] - size * math.sqrt(2)) / 2
     printed = size * SHEET_FACTOR
     sheet = next((name for name, side in SHEETS if side >= printed), 'larger than A0 (banner)')
     return {'size': size, 'px_per_cell': p['f'] * size / p['d'] / CELLS, 'printed': printed,
-            'sheet': sheet, 'zone_radius': r,
+            'sheet': sheet, 'zone_radius': r, 'zone_radius_long': r_long,
             'grid_spacing': math.sqrt(2) * r if r > 0 else None,
-            'route_spacing': 2 * r + p['max_gap'] if r > 0 else None}
+            'route_spacing': 2 * r + p['max_gap'] if r > 0 else None,
+            'route_spacing_no_odom': 2 * r if r > 0 else None}
+
+
+def route_markers(length: float, spacing: Optional[float]) -> Optional[int]:
+    """Markers along a route of `length` m at `spacing` m: ceil(L / D) + 1."""
+    if not spacing or spacing <= 0 or length < 0:
+        return None
+    return int(math.ceil(length / spacing - 1e-9)) + 1
