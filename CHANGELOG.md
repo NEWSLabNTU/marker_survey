@@ -4,7 +4,7 @@ Versions follow semantic versioning. Every change of a parameter, a launch
 argument, a topic or a file format gets an entry. The marker map file has
 its own `version` (now 1); the loader keeps reading older versions.
 
-## Unreleased
+## 0.3.0 (2026-10-15)
 
 ### Survey uncertainty
 
