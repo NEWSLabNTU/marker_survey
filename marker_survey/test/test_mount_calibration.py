@@ -20,8 +20,8 @@ R0 = R_LINK @ R_LINK_OPT
 T0 = np.array([-0.12, 0.0, 0.26])
 
 
-def spin(r_true, t_true, robot=(0.3, 0.1), yaw0=0.5, turns=1.0, steps=90):
-    obs = Observations(MARKERS, SIZE, K, D)
+def spin(r_true, t_true, robot=(0.3, 0.1), yaw0=0.5, turns=1.0, steps=90, markers=None):
+    obs = Observations(MARKERS, SIZE, K, D) if markers is None else Observations(markers, None, K, D)
     for i in range(steps):
         yaw = 2 * math.pi * turns * i / steps
         c, s = math.cos(yaw0 + yaw), math.sin(yaw0 + yaw)
@@ -30,8 +30,8 @@ def spin(r_true, t_true, robot=(0.3, 0.1), yaw0=0.5, turns=1.0, steps=90):
         r_map_cam = r_map_base @ r_true
         t_map_cam = t_map_base + r_map_base @ t_true
         detections = []
-        for mid, m in MARKERS.items():
-            pts = corner_points(m, SIZE)
+        for mid, m in obs.markers.items():
+            pts = corner_points(m, obs.size_of(mid))
             cam = (pts - t_map_cam) @ r_map_cam          # map -> camera
             if np.any(cam[:, 2] <= 0):
                 continue
@@ -72,3 +72,20 @@ def test_finds_tilt_and_offset_without_noise(dx, dy, tx, ty):
 def test_too_little_turning_is_refused():
     with pytest.raises(ValueError):
         solve(spin(R0, T0, turns=0.3, steps=20), R0, T0)
+
+
+def test_a_marker_map_with_tilted_markers_and_their_own_sizes():
+    """A version 1 map goes in as it is: marker 7 tilted 6 deg, lower and smaller."""
+    from marker_survey.core import marker_map as mm
+    the_map = mm.MarkerMap(dictionary='tag36h11', marker_size=SIZE, mount='ceiling', markers=[
+        mm.MapMarker(5, 0.0, -0.5, 3.0, 'ceiling', {'rotation_deg': 0.0}),
+        mm.MapMarker(7, 0.8, 0.4, 2.8, 'ceiling', {'rotation_deg': 23.0, 'tilt_x_deg': 6.0},
+                     size=0.30)])
+    obs = spin(R0, T0, markers=the_map)
+    assert obs.size_of(7) == 0.30 and len(set(np.round(obs.frames[0][3], 6))) > 2   # corner heights
+    result, before, after = solve(obs, R0, T0)
+    assert before < 1e-4 and abs(result['tilt_x']) < 1e-4
+    r_true, t_true = corrected_mounting(R0, T0, 0.0, 0.0, 0.015, -0.01)
+    result, before, after = solve(spin(r_true, t_true, markers=the_map), R0, T0)
+    assert result['tilt_x'] == pytest.approx(0.015, abs=2e-4)
+    assert result['tilt_y'] == pytest.approx(-0.01, abs=2e-4)

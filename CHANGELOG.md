@@ -111,6 +111,10 @@ browser (phase 5).
   time and the recording over, none of its timers fired any more). The
   hang did not reproduce locally (37 runs of the CI sequence, 60 of an idle
   node); `ci/lib.sh` keeps its bounded stop.
+- `core/mount_calibration.Observations` takes a `MarkerMap` (or
+  `{id: MapMarker}`): tilted markers and per-marker sizes go through, each
+  corner at its own map height. The older `{id: {x, y, z, yaw}}` with one
+  `marker_size` still works.
 - `marker_map_import` rounds the angles it converts from radians within
   the source's own precision, by at most 0.005 deg: 0.5236 rad is
   `facing_deg: 30.0`, no longer 30.00007. Its check against the source

@@ -43,12 +43,32 @@ def corrected_mounting(r0, t0, dx, dy, tilt_x, tilt_y):
 
 
 class Observations:
-    """Marker corners seen during the spin, as camera rays."""
+    """Marker corners seen during the spin, as camera rays.
+
+    markers: a marker_map.MarkerMap (version 1: tilted markers and per-marker
+    sizes included; marker_size may then be None), or {id: MapMarker}, or the
+    older {id: dict with x, y, z, yaw [rad]} of level ceiling markers, with
+    marker_size for all. Each corner is cut with the horizontal plane at its
+    own map height, so a tilted marker counts with its true corners."""
 
     def __init__(self, markers, marker_size, camera_matrix, dist_coeffs):
-        self.markers, self.size = markers, marker_size
+        if hasattr(markers, 'by_id'):                 # a MarkerMap
+            self.markers = markers.by_id()
+            self.size_of = markers.size_of
+        else:
+            self.markers = dict(markers)
+            self.size_of = lambda mid: self._size(mid, marker_size)
+        self.size = marker_size
         self.k, self.d = camera_matrix, dist_coeffs
         self.frames = []    # (odometry yaw, rays N x 3, map corners N x 2, heights N)
+
+    def _size(self, mid, default):
+        size = getattr(self.markers[mid], 'size', None)
+        if size is None:
+            if default is None:
+                raise ValueError(f'marker {mid}: no size (give marker_size or a MarkerMap)')
+            return float(default)
+        return float(size)
 
     def add(self, yaw, detections):
         """detections: [(marker_id, 4 x 2 pixel corners)] of one image."""
@@ -60,8 +80,9 @@ class Observations:
             p = np.asarray(pixels, dtype=np.float64).reshape(-1, 1, 2)
             n = cv2.undistortPoints(p, self.k, self.d).reshape(-1, 2)
             rays.append(np.hstack([n, np.ones((len(n), 1))]))
-            corners.append(corner_points(marker, self.size)[:, :2])
-            heights += [marker['z']] * 4
+            c = corner_points(marker, self.size_of(marker_id))
+            corners.append(c[:, :2])
+            heights += list(c[:, 2])
         if rays:
             self.frames.append((yaw, np.vstack(rays), np.vstack(corners), np.array(heights)))
 
