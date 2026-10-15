@@ -23,6 +23,19 @@ Settings per family, each one measured:
   are dropped.
 - Markers whose shortest edge is under `min_marker_px` are dropped: their
   corners are too coarse to place them.
+- Speed, AprilTag families: CORNER_REFINE_APRILTAG runs AprilTag's own quad
+  search over the whole image, and on a noisy image (sensor noise of 3 grey
+  levels) it took 110 to 130 ms for 640 x 480 on one desktop core, against
+  10 ms on a clean one. Decimating that search by 2 (`quad_decimate`) and
+  ignoring clusters with less than 30 grey levels between black and white
+  (`min_contrast`) brings it to 5 ms with the same markers found and the same
+  corners after the refinement below (within 0.05 px); a decimation of 3
+  started to lose markers under 35 px. OpenCV 4.5 hangs in that search with
+  any decimation on some images (an empty, clean frame), so the default
+  (`quad_decimate=-1`) decimates by 2 from OpenCV 4.6 on and not at all on
+  4.5, where the contrast floor alone keeps a noisy frame near 10 ms.
+- Speed, large images: `detect_scale` under 1 finds the markers in a
+  downscaled copy and refines their corners on the full image.
 
 API differences: OpenCV 4.7 added the ArucoDetector class and dropped
 DetectorParameters_create(); 4.5 and 4.6 have only the function API, and on
@@ -104,7 +117,8 @@ class Detector:
     """Detects one dictionary with the settings that work for its family."""
 
     def __init__(self, dictionary: str, min_marker_px: float = 20.0, border_margin: float = 5.0,
-                 edges: bool = True):
+                 edges: bool = True, detect_scale: float = 1.0, quad_decimate: float = -1.0,
+                 min_contrast: int = 30):
         import cv2
         self.cv2 = cv2
         self.name = dictionary
@@ -119,6 +133,15 @@ class Detector:
             self.params = cv2.aruco.DetectorParameters()
         self.params.cornerRefinementMethod = (
             cv2.aruco.CORNER_REFINE_APRILTAG if self.apriltag else cv2.aruco.CORNER_REFINE_NONE)
+        if self.apriltag:
+            if quad_decimate < 0:
+                major, minor = (int(v) for v in cv2.__version__.split('.')[:2])
+                quad_decimate = 2.0 if (major, minor) >= (4, 6) else 0.0
+            self.params.aprilTagQuadDecimate = float(quad_decimate)
+            self.params.aprilTagMinWhiteBlackDiff = int(min_contrast)
+        if not 0.1 <= float(detect_scale) <= 1.0:
+            raise ValueError(f'detect_scale {detect_scale}: between 0.1 and 1')
+        self.scale = float(detect_scale)
         self.cells = self.dictionary.markerSize + 2      # bits plus the black border
         self.legacy = not hasattr(cv2.aruco, 'ArucoDetector')
         self.detector = None if self.legacy else cv2.aruco.ArucoDetector(self.dictionary, self.params)
@@ -128,12 +151,16 @@ class Detector:
         """Every decoded marker; `rejected` says why one is not to be used."""
         cv2 = self.cv2
         gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        small = gray if self.scale >= 1.0 else cv2.resize(gray, None, fx=self.scale, fy=self.scale,
+                                                          interpolation=cv2.INTER_AREA)
         if self.legacy:
-            corners, ids, _ = cv2.aruco.detectMarkers(gray, self.dictionary, parameters=self.params)
+            corners, ids, _ = cv2.aruco.detectMarkers(small, self.dictionary, parameters=self.params)
         else:
-            corners, ids, _ = self.detector.detectMarkers(gray)
+            corners, ids, _ = self.detector.detectMarkers(small)
         if ids is None:
             return []
+        if self.scale < 1.0:        # pixel centres: full (x + 0.5) / scale - 0.5
+            corners = [(np.asarray(c, np.float32) + 0.5) / self.scale - 0.5 for c in corners]
         h, w = gray.shape[:2]
         b = self.border_margin
         out = []
@@ -176,7 +203,13 @@ def refine_edges(gray, corners, cells: int, width: float = 0.7, ends: int = 4) -
     edge = min(np.linalg.norm(c[i] - c[(i + 1) % 4]) for i in range(4))
     r = float(np.clip(width * edge / cells, 1.0, 4.0))   # part of a cell each way, 1 to 4 px
     offs = np.arange(-r, r + 1e-9, 0.25)
-    g = gray.astype(np.float32)
+    # only the marker's surroundings, as float (remap of uint8 would round the samples)
+    x0 = max(0, int(np.floor(c[:, 0].min() - r - 2)))
+    y0 = max(0, int(np.floor(c[:, 1].min() - r - 2)))
+    x1 = min(gray.shape[1], int(np.ceil(c[:, 0].max() + r + 3)))
+    y1 = min(gray.shape[0], int(np.ceil(c[:, 1].max() + r + 3)))
+    g = gray[y0:y1, x0:x1].astype(np.float32)
+    origin = np.array([x0, y0], float)
     lines = []
     for i in range(4):
         a, b = c[i], c[(i + 1) % 4]
@@ -188,27 +221,23 @@ def refine_edges(gray, corners, cells: int, width: float = 0.7, ends: int = 4) -
         s = np.linspace(0.15, 0.85, max(5, int(length)))
         P = a[None, :] + (s * length)[:, None] * t[None, :]
         Q = P[:, None, :] + offs[None, :, None] * n[None, None, :]
-        prof = cv2.remap(g, Q[..., 0].astype(np.float32), Q[..., 1].astype(np.float32),
-                         cv2.INTER_LINEAR)
+        prof = cv2.remap(g, (Q[..., 0] - origin[0]).astype(np.float32),
+                         (Q[..., 1] - origin[1]).astype(np.float32), cv2.INTER_LINEAR)
         third = max(1, len(offs) // ends)
-        pts = []
-        for j in range(len(P)):
-            p = prof[j]
-            lo, hi = p[:third].mean(), p[-third:].mean()
-            if hi - lo < 20:
-                continue
-            mid = (lo + hi) / 2
-            above = np.nonzero(p > mid)[0]
-            if not len(above) or above[0] == 0:
-                continue
-            k = above[0]
-            f = (mid - p[k - 1]) / (p[k] - p[k - 1])
-            pts.append(P[j] + (offs[k - 1] + f * (offs[k] - offs[k - 1])) * n)
-        if len(pts) < 3:
+        lo, hi = prof[:, :third].mean(axis=1), prof[:, -third:].mean(axis=1)
+        mid = (lo + hi) / 2
+        above = prof > mid[:, None]
+        k = np.argmax(above, axis=1)                       # the first sample above half way
+        ok = (hi - lo >= 20) & above.any(axis=1) & (k > 0)
+        if np.count_nonzero(ok) < 3:
             return None
-        pts = np.array(pts)
+        rows = np.nonzero(ok)[0]
+        k = k[ok]
+        p0, p1 = prof[rows, k - 1], prof[rows, k]
+        f = (mid[ok] - p0) / (p1 - p0)
+        pts = P[ok] + (offs[k - 1] + f * (offs[k] - offs[k - 1]))[:, None] * n[None, :]
         mu = pts.mean(axis=0)
-        _, _, vt = np.linalg.svd(pts - mu)
+        _, _, vt = np.linalg.svd(pts - mu, full_matrices=False)
         lines.append((mu, vt[0]))
     out = []
     for i in range(4):

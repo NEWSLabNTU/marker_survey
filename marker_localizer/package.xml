@@ -3,11 +3,25 @@
 <package format="3">
   <name>marker_localizer</name>
   <version>0.1.0</version>
-  <description>The localizer: robot pose from a marker map, 6-DoF or planar. Placeholder (phase 3).</description>
+  <description>
+    The localizer: the robot's pose from the markers in view against a marker
+    map (marker_map.yaml), as a full 6-DoF pose (wall boards) or as x, y and yaw
+    on a flat floor (ceiling markers); covariance, a gate against the state
+    estimator, a debug image. The core module does not need ROS.
+  </description>
   <maintainer email="noreply@example.com">marker_survey maintainers</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>marker_survey</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

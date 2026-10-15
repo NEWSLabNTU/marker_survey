@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<!--
+  Example: a vehicle localizing on wall boards with a wide forward camera,
+  3d mode (6-DoF), gated against its state estimator's pose
+  (PoseWithCovarianceStamped). The vehicle's own launch runs the camera
+  driver, its TF (base_link to the camera) and the estimator. Then:
+
+    ros2 launch examples/launch/wall_boards_localizer.launch.xml marker_map:=$PWD/my_course/marker_map.yaml
+
+  detect_scale 0.5 finds the boards in a half-size image and refines their
+  corners on the full one: a 1920 x 1200 colour image then takes about a
+  fifth of the time to detect.
+-->
+<launch>
+  <arg name="marker_map"/>
+  <arg name="image_topic" default="/camera/image_rect"/>
+  <arg name="camera_info_topic" default="/camera/camera_info"/>
+  <arg name="prior_topic" default="/localization/pose_with_covariance"/>
+  <arg name="detect_scale" default="0.5"/>
+
+  <include file="$(find-pkg-share marker_localizer)/launch/localizer.launch.xml">
+    <arg name="marker_map" value="$(var marker_map)"/>
+    <arg name="mode" value="3d"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="prior_topic" value="$(var prior_topic)"/>
+    <arg name="prior_type" value="pose"/>
+    <arg name="detect_scale" value="$(var detect_scale)"/>
+  </include>
+</launch>

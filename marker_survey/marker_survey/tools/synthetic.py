@@ -11,10 +11,15 @@ rosbag2 with the topics the survey node reads:
                          (so that map -> base_link is a localizer's pose: the
                          truth plus --map-noise)
   /tf_static             base_link -> camera_link -> camera_optical_frame
+  /prior_pose            geometry_msgs/PoseWithCovarianceStamped, the same
+                         localizer pose at every image's stamp (a state
+                         estimator's pose, for the localizer's gate)
 
 and beside it the truth: truth_map.yaml (the markers in the map frame, what
-pose_frame and align_to_track surveys should give) and, with --origin,
-truth_origin.yaml (in the frame of that marker, what origin_marker gives).
+pose_frame and align_to_track surveys should give), with --origin
+truth_origin.yaml (in the frame of that marker, what origin_marker gives), and
+truth_poses.csv (stamp and true base_link pose in the map of every image, to
+score a localizer).
 
     marker_survey_synthetic OUT --map examples/sites/test_course/marker_map.yaml \\
         --route examples/sites/test_course/route.csv --camera forward --origin 10
@@ -22,6 +27,7 @@ truth_origin.yaml (in the frame of that marker, what origin_marker gives).
 
 import argparse
 import json
+import math
 import os
 
 import numpy as np
@@ -111,7 +117,7 @@ def scene(args):
 def main(argv=None):
     import rclpy.serialization as ser
     import rosbag2_py
-    from geometry_msgs.msg import TransformStamped
+    from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
     from nav_msgs.msg import Odometry
     from sensor_msgs.msg import CameraInfo, Image
     from tf2_msgs.msg import TFMessage
@@ -140,6 +146,7 @@ def main(argv=None):
         '/odom': 'nav_msgs/msg/Odometry',
         '/tf': 'tf2_msgs/msg/TFMessage',
         '/tf_static': 'tf2_msgs/msg/TFMessage',
+        '/prior_pose': 'geometry_msgs/msg/PoseWithCovarianceStamped',
     }
     for n, (name, typ) in enumerate(topics.items()):
         w.create_topic(topic_metadata(rosbag2_py, n, name, typ,
@@ -163,12 +170,19 @@ def main(argv=None):
     def ns(t):
         return int(round(t * 1e9))
 
+    def msg_stamp(t):
+        """The stamp as the messages carry it: sec.nanosec, written exactly."""
+        sec = int(t)
+        return f'{sec}.{int(round((t - sec) * 1e9)) % 1_000_000_000:09d}'
+
     static = TFMessage(transforms=[tfs('base_link', 'camera_link', T_base_link, t0),
                                    tfs('camera_link', 'camera_optical_frame', T_link_opt, t0)])
     w.write('/tf_static', ser.serialize_message(static), ns(t0))
 
     odo_div = 3                        # odometry 3x the camera rate
     dt = 1.0 / args.rate
+    truth_rows = []
+    prior_var = [max(args.map_noise, 0.01) ** 2, max(math.radians(args.map_noise_yaw_deg), 0.005) ** 2]
     for k, f in enumerate(frames):
         t = t0 + 1.0 + k * dt
         prev = frames[k - 1].T_odom_base if k > 0 else f.T_odom_base
@@ -189,6 +203,19 @@ def main(argv=None):
                 T_map_odom = f.T_mapmeas_base @ inv_T(f.T_odom_base)
                 tf.append(tfs('map', 'odom', T_map_odom, tj))
             w.write('/tf', ser.serialize_message(TFMessage(transforms=tf)), ns(tj))
+        pr = PoseWithCovarianceStamped()
+        stamp(pr.header, t)
+        pr.header.frame_id = 'map'
+        P = f.T_mapmeas_base
+        pr.pose.pose.position.x, pr.pose.pose.position.y, pr.pose.pose.position.z = \
+            (float(v) for v in P[:3, 3])
+        (pr.pose.pose.orientation.x, pr.pose.pose.orientation.y, pr.pose.pose.orientation.z,
+         pr.pose.pose.orientation.w) = (float(v) for v in matrix_to_quat(P[:3, :3]))
+        cov = np.diag([prior_var[0], prior_var[0], 1e-4, 1e-4, 1e-4, prior_var[1]])
+        pr.pose.covariance = [float(v) for v in cov.ravel()]
+        w.write('/prior_pose', ser.serialize_message(pr), ns(t) - 1)
+        Tt = f.T_map_base
+        truth_rows.append((msg_stamp(t), *Tt[:3, 3], *matrix_to_quat(Tt[:3, :3])))
         img = renderer.render(markers, sizes, f.T_map_base @ camera.T_base_cam)
         msg = Image()
         stamp(msg.header, t)
@@ -214,6 +241,10 @@ def main(argv=None):
         mm.write(truth_map(site, T_om, f'Truth of the synthetic recording, frame of marker '
                                        f'{args.origin} (origin_marker mode).'),
                  os.path.join(args.out, 'truth_origin.yaml'))
+    with open(os.path.join(args.out, 'truth_poses.csv'), 'w') as fh:
+        fh.write('# stamp [s], true base_link pose in the map: x, y, z [m], qx, qy, qz, qw\n')
+        for r in truth_rows:
+            fh.write(r[0] + ',' + ','.join(f'{v:.9f}' for v in r[1:]) + '\n')
     with open(os.path.join(args.out, 'scene.json'), 'w') as fh:
         json.dump({k: v for k, v in vars(args).items()}, fh, indent=1)
     length = sum(np.linalg.norm(frames[i + 1].T_map_base[:3, 3] - frames[i].T_map_base[:3, 3])

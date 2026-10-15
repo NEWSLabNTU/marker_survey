@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!--
+  Example: an indoor robot localizing on ceiling markers with an upward
+  webcam, planar mode (x, y, yaw), its fixes fused by the robot's state
+  estimator. The robot's own launch runs the camera driver, its TF
+  (base_link to the camera) and the estimator, which publishes its pose as
+  nav_msgs/Odometry (the gate's prior) and takes the fixes on
+  /marker_localizer/pose. Then:
+
+    ros2 launch examples/launch/ceiling_markers_localizer.launch.xml marker_map:=$PWD/my_site/marker_map.yaml
+
+  roll_pitch tf reads the robot's tilt from TF odom -> base_link (an
+  estimator fusing an IMU); on a flat floor without one, zero.
+-->
+<launch>
+  <arg name="marker_map"/>
+  <arg name="image_topic" default="/ceiling_camera/image_raw"/>
+  <arg name="camera_info_topic" default="/ceiling_camera/camera_info"/>
+  <arg name="prior_topic" default="/odometry/filtered"/>
+  <arg name="roll_pitch" default="zero" description="zero, tf (with roll_pitch_frame odom) or imu"/>
+
+  <include file="$(find-pkg-share marker_localizer)/launch/localizer.launch.xml">
+    <arg name="marker_map" value="$(var marker_map)"/>
+    <arg name="mode" value="planar"/>
+    <arg name="image_topic" value="$(var image_topic)"/>
+    <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+    <arg name="prior_topic" value="$(var prior_topic)"/>
+    <arg name="prior_type" value="odometry"/>
+    <arg name="roll_pitch" value="$(var roll_pitch)"/>
+    <arg name="roll_pitch_frame" value="odom"/>
+  </include>
+</launch>

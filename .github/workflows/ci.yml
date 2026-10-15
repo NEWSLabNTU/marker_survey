@@ -77,3 +77,74 @@ jobs:
             ci_out/*/result/
             ci_out/*/truth_*.yaml
             ci_out/*/node.log
+
+  synthetic-localize:
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+        scene: [ceiling, ceiling_gate, wall]
+    runs-on: ubuntu-24.04
+    container: ros:${{ matrix.distro }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies
+        run: ci/install_deps.sh ${{ matrix.distro }}
+      - name: Build
+        run: |
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          colcon build --event-handlers console_cohesion+
+      - name: Rendered recording through the localizer node
+        run: |
+          source install/setup.bash
+          ci/synthetic_localize.sh ${{ matrix.scene }} ci_out
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: localize-${{ matrix.scene }}-${{ matrix.distro }}
+          path: |
+            ci_out/*/truth_poses.csv
+            ci_out/*/node.log
+            ci_out/*/poses/
+
+  localizer-comparison:
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+        scene: [ceiling, wall]
+    runs-on: ubuntu-24.04
+    container: ros:${{ matrix.distro }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies
+        run: ci/install_deps.sh ${{ matrix.distro }}
+      - name: Against the source implementations' methods, rendered frames
+        run: ci/localizer_comparison.sh ${{ matrix.scene }} ci_out
+
+  timing:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: ros:jazzy
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies
+        run: ci/install_deps.sh jazzy
+      - name: CPU
+        run: lscpu | grep -E 'Architecture|Model name|^CPU\(s\)' || true
+      - name: Detection and fit per frame, one core
+        run: ci/timing.sh 0

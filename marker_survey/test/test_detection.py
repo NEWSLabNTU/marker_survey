@@ -61,3 +61,33 @@ def test_a_small_marker_is_rejected():
     assert [d.rejected for d in every] == ['small']
     assert det.detect(img) == []
     assert [d.id for d in Detector('tag36h11', min_marker_px=10.0).detect(img)] == [5]
+
+
+def test_detection_in_a_downscaled_image_refines_corners_at_full_size():
+    cam = sim.forward_camera(1920, 1200)
+    from marker_survey.core.marker_map import mount_rotation
+    markers = {10: make_T(mount_rotation('wall', {'facing_deg': 180.0}), [3.0, 0.3, 0.25]),
+               11: make_T(mount_rotation('wall', {'facing_deg': 160.0}), [5.0, -1.0, 0.25])}
+    T_wc = cam.T_base_cam
+    img = view('DICT_5X5_1000', markers, 0.38, T_wc, cam)
+    full = {d.id: d.corners for d in Detector('DICT_5X5_1000').detect(img)}
+    half = {d.id: d.corners for d in Detector('DICT_5X5_1000', detect_scale=0.5).detect(img)}
+    assert sorted(full) == sorted(half) == [10, 11]
+    for k in full:
+        assert np.abs(full[k] - half[k]).max() < 0.1
+
+
+def test_noisy_frames_stay_fast_for_apriltag_families():
+    """The contrast floor keeps AprilTag's quad search from chasing sensor noise."""
+    import time
+    cam = sim.upward_camera()
+    markers = {3: ceiling_marker(0.4, 0.3, 3.0, 20.0)}
+    img = view('tag36h11', markers, 0.45, cam.T_base_cam, cam).astype(float)
+    img = np.clip(img + np.random.default_rng(0).normal(0, 4, img.shape), 0, 255).astype(np.uint8)
+    det = Detector('tag36h11')
+    det.detect(img)
+    t = time.perf_counter()
+    for _ in range(5):
+        dets = det.detect(img)
+    assert [d.id for d in dets] == [3]
+    assert (time.perf_counter() - t) / 5 < 0.08
