@@ -22,8 +22,8 @@ Status: phases 0 to 3 of [ROADMAP.md](ROADMAP.md) are done: the survey for
 wall boards and ceiling markers, in three frame modes, the marker map file,
 the localizer in both modes, the tools and CI. Of phase 4, the integration
 guide, [docs/integration.md](docs/integration.md), and the two examples
-that run in CI are done, and 0.1.0 is tagged; the move of the source
-projects onto the packages is open. Of phase 5, the web interface is in:
+that run in CI are done, 0.1.0 and 0.2.0 are tagged, and both source
+projects run on the packages on feature branches, not yet merged. Of phase 5, the web interface is in:
 printing and identifying markers, and on the robot surveying, checking and
 using the map from a browser, tested in Chromium on simulated recordings in
 CI; the usability session with a person new to the tools is open. Timing on
