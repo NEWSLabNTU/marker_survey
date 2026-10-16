@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>marker_localizer</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>
     The localizer: the robot's pose from the markers in view against a marker
     map (marker_map.yaml), as a full 6-DoF pose (wall boards) or as x, y and yaw

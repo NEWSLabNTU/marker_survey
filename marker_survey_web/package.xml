@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>marker_survey_web</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>The browser interface: plan and print marker sheets, identify markers from a photo; on the robot or a laptop with a webcam, survey the markers, check and test the map and put it to use.</description>
   <maintainer email="noreply@example.com">marker_survey maintainers</maintainer>
   <license>Apache-2.0</license>
