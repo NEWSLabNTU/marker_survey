@@ -411,7 +411,7 @@ marker position error in 3D; the same numbers on Humble and Jazzy):
 
 | Scene | Frame mode | Target | Result |
 |---|---|---|---|
-| 11 wall boards of 0.38 m, 10 x 4 m oval, forward camera 960 x 600 at 102 deg, one lap at 3 Hz, odometry drift 1 % | `origin_marker` | median 1 cm, max 4 cm | median 0.9 cm, max 1.5 cm |
+| 11 wall boards of 0.38 m, 10 x 4 m oval, forward camera 960 x 600 at 102 deg, one lap at 3 Hz, odometry drift 1 % | `origin_marker` | median 1.2 cm, max 4 cm | median 0.9 cm, max 1.5 cm |
 | 9 ceiling tags of 0.45 m at 3 m, office routes (2 laps, 92 m), upward camera 640 x 480 at 70 deg, map pose noise 6 cm per axis and 1 deg | `pose_frame` | median under 4 cm | median 0.7 cm, max 1.0 cm |
 | the same | `align_to_track` | median under 2 cm | median 0.6 cm, max 1.2 cm |
 | uneven ceiling (2.8 to 3.4 m), tags tilted 6 and 4 deg | `align_to_track` | heights within 2 cm, tilts within 1 deg | heights within 0.7 cm, tilts within 0.12 deg |
