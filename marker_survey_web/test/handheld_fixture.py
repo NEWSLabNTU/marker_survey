@@ -154,7 +154,7 @@ class HandheldRobot:
 
     def push(self):
         frame = {'mode': self.frame.mode, 'origin_marker': self.frame.origin_marker, 'frame_id': 'map',
-                 'reference_frame': '', 'pose_source': 'markers', 'pose_frame': '', 'odom_frame': 'map'}
+                 'reference_frame': 'map', 'pose_source': 'markers', 'pose_frame': '', 'odom_frame': 'map'}
         st = live.status_dict(
             self.survey, 'recording' if self.recording else 'paused', frame, self.report,
             self.report_views, self.last_dets, self.T_base,

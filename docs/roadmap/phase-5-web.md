@@ -239,6 +239,11 @@ the handheld preset, the camera-only survey losing track in a step aside,
 the kidnap, test points, the CSV; `handheld_fixture.py` plays a simulated
 walk under a row of eleven 0.40 m markers 1.2 m apart through the real
 localizer); `test_launch_names.py` starts `handheld.launch.xml` without the
-camera; `ci/web_handheld.sh` walks plan, survey and test in Chromium on the
-same simulated walk (the step `The handheld case from the browser` of the
-`web-browser` job).
+camera; `ci/web_handheld.sh` walks plan, survey and test in Chromium (the
+step `The handheld case from the browser` of the `web-browser` job) with
+`handheld.launch.xml` on two renderings of the `examples/handheld_ceiling`
+walk (twenty 0.40 m markers on a 1.4 m grid at 2.9 m; out past the west end
+and a 3 s tilt away from the ceiling): the survey maps all 20 markers and
+its banner shows while no mapped marker is in view; the test screen shows
+two kidnaps (1.4 m after 2.8 s without a fix, 2.8 m after 8.6 s). With
+`STAND_IN=1` it runs on `handheld_fixture.py` instead, with no ROS nodes.

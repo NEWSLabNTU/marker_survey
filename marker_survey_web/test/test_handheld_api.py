@@ -7,7 +7,6 @@ markers) and the localizer (3d, no prior) would report it.
 import csv
 import io
 import json
-import math
 import os
 import threading
 import urllib.request
@@ -71,10 +70,9 @@ def test_the_plan_is_marker_plan_for_a_handheld_webcam(plain):
     assert res['readable_from_cm'] == round(p['s_min'] * 100, 1)
     assert res['fits_up_to_cm'] == round(p['s_max'] * 100, 1)
     assert res['zone_radius_m'] == round(r['zone_radius'], 3)
-    no_odom = r.get('route_spacing_no_odom', 2 * r['zone_radius'])
-    assert res['route_spacing_no_odom_m'] == round(no_odom, 3)
+    assert res['route_spacing_no_odom_m'] == round(r['route_spacing_no_odom'], 3)
     assert abs(res['route_spacing_no_odom_m'] - 2 * res['zone_radius_m']) < 0.002
-    assert res['marker_count'] == math.ceil(30 / no_odom) + 1
+    assert res['marker_count'] == mp.route_markers(30, r['route_spacing_no_odom']) == 23
     assert res['printed_cm'] == 50.0 and res['sheet'] == r['sheet']
     assert res['view_w_m'] > res['view_h_m'] > 1.9
 

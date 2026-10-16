@@ -128,11 +128,13 @@ its own `version` (now 1); the loader keeps reading older versions.
 - Node parameter and launch argument `camera_info_topic` (empty: not read).
 - `launch/handheld.launch.xml`: `usb_cam` (optional: `launch_camera`, a
   params file, `config/handheld_usb_cam.yaml`), the survey with the camera
-  alone, the localizer in 3d with no prior, the web node; the camera's
-  optical frame is the base frame, no TF.
+  alone (`vertical: ceiling`, the floor `camera_height`, 1.0 m, below
+  the camera), the localizer in 3d with no prior, the web node; both
+  nodes with `base_frame` empty: the camera is the base, no TF.
 - Tests: `test_handheld_api.py` on a simulated handheld walk; the launch
   file without the camera; `ci/web_handheld.sh`, the handheld case in
-  Chromium, in the `web-browser` job.
+  Chromium on the `examples/handheld_ceiling` recording through
+  `handheld.launch.xml`, in the `web-browser` job.
 
 ## 0.3.0 (2026-10-15)
 

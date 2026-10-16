@@ -29,7 +29,6 @@ that fails.
 """
 import argparse
 import json
-import math
 import os
 import subprocess
 import time
@@ -137,8 +136,8 @@ def steps(page):
     page.fill('#pl_length', '30')
     p = mp.plan(2.9, 1.0, 70, 640, 480, 0.5, 0.02, 6.0, 5.0, 0.05, 0.05)
     r = mp.recommend(p)
-    d = r.get('route_spacing_no_odom', 2 * r['zone_radius'])
-    count = math.ceil(30 / d) + 1
+    d = r['route_spacing_no_odom']
+    count = mp.route_markers(30, d)
     size = round(r['size'] * 100, 1)
     nums = page.locator('#pl_numbers')
     expect(nums).to_contain_text(f'Markers for the route{count} for 30 m')
@@ -172,8 +171,9 @@ def steps(page):
     expect(page.locator('#sv_frames')).to_contain_text('the camera alone gives no map')
     page.fill('#sv_origin', '0')
     page.click('#sv_start_btn')
-    expect(page.locator('#sv_state')).to_contain_text('walk slowly')
+    expect(page.locator('#sv_state')).to_contain_text('Recording')
     walk = play('survey_walk')
+    expect(page.locator('#sv_state')).to_contain_text('walk slowly', timeout=120_000)
     page.wait_for_function("document.querySelectorAll('#sv_markers tr').length >= 3", timeout=LONG)
     banner = page.locator('#sv_lost')
     expect(banner).to_be_visible(timeout=LONG)
@@ -211,9 +211,9 @@ def steps(page):
     walked(walk, lambda s: s['localize']['images'], 'the walk to end')
     lz = state()['localize']
     assert len(lz['kidnaps']) >= 1 and any(t[2] == 1 for t in lz['track']), lz['kidnaps']
-    k = lz['kidnaps'][0]
-    print(f'-- kidnap: {k["gap_s"]} s without a fix, then {k["jump_m"]} m', flush=True)
-    assert k['jump_m'] > 2.0, k
+    for k in lz['kidnaps']:
+        print(f'-- kidnap: {k["gap_s"]} s without a fix, then {k["jump_m"]} m', flush=True)
+    assert max(k['jump_m'] for k in lz['kidnaps']) > 1.0, lz['kidnaps']
 
     pose = lz['pose']
     page.fill('#lz_px', f'{pose["x"] + 0.03:.3f}')

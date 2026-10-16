@@ -12,9 +12,10 @@
   writes to <site>/survey/; "Use the map" writes <site>/marker_map.yaml, which
   the localizer reads (it waits for the file on a new site).
 
-  The camera's optical frame is the base frame of both nodes (camera_frame,
-  the frame_id of the images): no robot frames, no TF. The marker you start
-  the survey from defines the map's frame.
+  The camera's optical frame is the base frame of both nodes (base_frame
+  empty): no robot frames, no TF. The marker you start the survey from
+  defines the map's frame: origin on the floor below it (camera_height below
+  the camera), z up opposite the ceiling markers' normal (vertical ceiling).
 
   launch_camera:=false: the images come from elsewhere (another driver, a
   recording: image_topic, camera_info_topic, use_sim_time:=true
@@ -30,7 +31,7 @@
   <arg name="camera_params" default="$(find-pkg-share marker_survey_web)/config/handheld_usb_cam.yaml"
        description="usb_cam's parameters: device, size, calibration (camera_info_url), frame_id"/>
   <arg name="camera_namespace" default="camera" description="usb_cam publishes image_raw and camera_info in it"/>
-  <arg name="camera_frame" default="camera" description="the images' frame_id: the base frame of both nodes"/>
+  <arg name="camera_height" default="1.0" description="[m] the camera above the floor while walking"/>
   <arg name="image_topic" default="/camera/image_raw"/>
   <arg name="camera_info_topic" default="/camera/camera_info"/>
   <arg name="survey" default="true" description="run the survey node (started from the page)"/>
@@ -56,7 +57,9 @@
       <arg name="marker_size" value="$(var marker_size)"/>
       <arg name="pose_source" value="markers"/>
       <arg name="frame_mode" value="origin_marker"/>
-      <arg name="base_frame" value="$(var camera_frame)"/>
+      <arg name="base_frame" value=""/>
+      <arg name="vertical" value="ceiling"/>
+      <arg name="floor_offset" value="$(var camera_height)"/>
       <arg name="image_topic" value="$(var image_topic)"/>
       <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
       <arg name="use_sim_time" value="$(var use_sim_time)"/>
@@ -68,7 +71,7 @@
     <include file="$(find-pkg-share marker_localizer)/launch/localizer.launch.xml">
       <arg name="marker_map" value="$(var site)/marker_map.yaml"/>
       <arg name="mode" value="$(var localizer_mode)"/>
-      <arg name="base_frame" value="$(var camera_frame)"/>
+      <arg name="base_frame" value=""/>
       <arg name="image_topic" value="$(var image_topic)"/>
       <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
       <arg name="prior_topic" value=""/>

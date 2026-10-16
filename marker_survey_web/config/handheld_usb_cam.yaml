@@ -2,7 +2,6 @@
 # Copy this file, set camera_info_url to your camera's calibration (ros2 run
 # camera_calibration cameracalibrator ...; without one the camera_info has no focal
 # length and the survey and localizer wait), and pass it as camera_params:=<file>.
-# frame_id must match the launch file's camera_frame argument.
 /**:
   ros__parameters:
     video_device: /dev/video0

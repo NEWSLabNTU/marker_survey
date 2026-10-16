@@ -8,6 +8,7 @@ numbers.
 import math
 
 from marker_survey.core import marker_plan as mp
+from marker_survey.tools.plan import HANDHELD
 
 MIN_PX_PER_CELL = 6.0
 BORDER_PX = 5.0
@@ -19,23 +20,13 @@ class PlanError(ValueError):
     pass
 
 
-# TEMPORARY until core/marker_plan.py has them (the interface agreed with the core)
-_PRESETS = getattr(mp, 'PRESETS', None) or {'robot': {'camera_height': 0.26, 'speed': 0.5},
-                                            'handheld': {'camera_height': 1.0, 'speed': 0.5}}
-
-
-def _no_odom(r):
-    return r['route_spacing_no_odom'] if 'route_spacing_no_odom' in r else 2 * r['zone_radius']
-
-
-def _count(length, spacing):
-    f = getattr(mp, 'marker_count', None)
-    return f(length, spacing) if f else int(math.ceil(length / spacing)) + 1
+ROBOT = {'camera_height': 0.26, 'speed': 0.5}     # marker_plan's defaults
+PRESETS = {'robot': ROBOT, 'handheld': HANDHELD}
 
 
 def presets() -> dict:
     """Camera height and speed for a robot and for a person holding the camera."""
-    return {name: dict(v) for name, v in _PRESETS.items()}
+    return {name: dict(v) for name, v in PRESETS.items()}
 
 
 def hfov_from_camera_info(width: float, fx: float) -> float:
@@ -60,9 +51,9 @@ def _num(body, key, default=None, cast=float):
 
 def site_plan(body: dict) -> dict:
     preset_name = body.get('preset') or 'robot'
-    pre = _PRESETS.get(preset_name)
+    pre = PRESETS.get(preset_name)
     if pre is None:
-        raise PlanError(f'unknown preset {preset_name!r}: {", ".join(_PRESETS)}')
+        raise PlanError(f'unknown preset {preset_name!r}: {", ".join(PRESETS)}')
     ceiling = _num(body, 'ceiling')
     cam = _num(body, 'camera_height', pre['camera_height'])
     hfov = _num(body, 'hfov', 70.0)
@@ -104,12 +95,12 @@ def site_plan(body: dict) -> dict:
         return out
     out['grid_spacing_m'] = round(r['grid_spacing'], 3)
     out['route_spacing_m'] = round(r['route_spacing'], 3)
-    out['route_spacing_no_odom_m'] = round(_no_odom(r), 3)
+    out['route_spacing_no_odom_m'] = round(r['route_spacing_no_odom'], 3)
     length = body.get('route_length')
     if length not in ('', None):
         L = _num(body, 'route_length')
         if L < 0:
             raise PlanError('the route length is 0 m or more')
         out['route_length_m'] = L
-        out['marker_count'] = int(_count(L, _no_odom(r)))
+        out['marker_count'] = mp.route_markers(L, r['route_spacing_no_odom'])
     return out

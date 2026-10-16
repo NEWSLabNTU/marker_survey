@@ -456,7 +456,7 @@ ros2 launch marker_survey_web handheld.launch.xml site:=$PWD/sites/my_site \
 | `launch_camera` | `true` | start `usb_cam` (not a dependency of the package: install `ros-<distro>-usb-cam`); `false`: the images come from elsewhere |
 | `camera_params` | `config/handheld_usb_cam.yaml` | `usb_cam`'s parameters; set `camera_info_url` to the camera's calibration |
 | `camera_namespace` | `camera` | where `usb_cam` publishes `image_raw` and `camera_info` |
-| `camera_frame` | `camera` | the images' `frame_id`: the base frame of both nodes, so no TF is needed |
+| `camera_height` | 1.0 | [m] the camera above the floor while walking: the survey's floor lies this far below it |
 | `image_topic`, `camera_info_topic` | `/camera/image_raw`, `/camera/camera_info` | |
 | `survey`, `localizer` | `true`, `true` | run that node (a slow laptop runs one at a time) |
 | `dictionary`, `marker_size` | `tag36h11`, 0.40 | |
@@ -465,8 +465,10 @@ ros2 launch marker_survey_web handheld.launch.xml site:=$PWD/sites/my_site \
 | `use_sim_time`, `process_all` | `false` | for a recording |
 
 The survey runs with `pose_source: markers` (the camera alone: each frame
-is placed on the markers already mapped) and starts from a marker, which
-defines the map's frame; the localizer runs with no prior.
+is placed on the markers already mapped), `vertical: ceiling` and
+`base_frame` empty (the camera is the base, no TF), and starts from a
+marker, which defines the map's frame; the localizer runs in 3d with no
+prior and `base_frame` empty.
 
 | Parameter | Default | Meaning |
 |---|---|---|
