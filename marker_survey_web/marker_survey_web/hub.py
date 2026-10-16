@@ -62,7 +62,11 @@ def frame_options(st: dict) -> list:
     """The ways a survey can be placed, in plain words, for this robot's setup."""
     f = (st or {}).get('frame') or {}
     robot_map, why = None, ''
-    if f.get('reference_frame'):
+    if f.get('pose_source') == 'markers':
+        label = "Use the robot's map"
+        text = ''
+        why = 'the camera alone gives no map: start from a marker'
+    elif f.get('reference_frame'):
         robot_map = 'align_to_track'
         label = f"Use the robot's map ({f['reference_frame']})"
         text = ('The markers are placed in the map the robot already drives on: the survey '
@@ -71,10 +75,6 @@ def frame_options(st: dict) -> list:
         robot_map = 'pose_frame'
         label = f"Use the robot's map ({f['pose_frame']})"
         text = 'The markers are placed in the frame of the robot\'s position.'
-    elif f.get('pose_source') == 'markers':
-        label = "Use the robot's map"
-        text = ''
-        why = 'the camera alone gives no map: start from a marker'
     else:
         label = "Use the robot's map"
         text = ''
