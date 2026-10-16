@@ -87,8 +87,10 @@ its own `version` (now 1); the loader keeps reading older versions.
   of the printed sheet with its white margin, textured from the
   dictionary's bits, PNGs written next to the SDF) at any pose (ceiling,
   wall, floor), facing the marker's z axis; `--world` for a whole Gazebo
-  Harmonic world (ground, a ceiling plane at `--ceiling` or behind the
-  highest ceiling marker, lights from below and above, the physics,
+  Harmonic world (ground, a ceiling plane at `--ceiling` but never in front
+  of a ceiling marker: a measured 2.9 m with markers surveyed at 2.901 m
+  would hide them from below, so the plane goes just behind the highest
+  ceiling marker when that is higher; lights from below and above, the physics,
   sensors, scene broadcaster and user commands systems);
   `--replace-between FILE` rewrites the lines between
   `<!-- BEGIN ceiling markers` and `<!-- END ceiling markers -->` of an

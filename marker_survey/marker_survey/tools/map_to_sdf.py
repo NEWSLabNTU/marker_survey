@@ -32,7 +32,9 @@ def main(argv=None):
     ap.add_argument('map', help='marker_map.yaml')
     ap.add_argument('out', nargs='?', help='the SDF to write (models only, or a world with --world)')
     ap.add_argument('--world', action='store_true', help='a whole world, not only the models')
-    ap.add_argument('--ceiling', type=float, help='[m] the ceiling plane\'s height (--world)')
+    ap.add_argument('--ceiling', type=float,
+                    help='[m] the ceiling plane\'s height (--world); raised to just behind '
+                    'the highest ceiling marker if that is higher')
     ap.add_argument('--world-name', default='markers')
     ap.add_argument('--replace-between', metavar='FILE',
                     help='rewrite the models between the BEGIN and END lines of this world')

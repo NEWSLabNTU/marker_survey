@@ -15,7 +15,8 @@ y to its top, z out of the face), so the visual's frame is the marker's frame
 and the image needs no flip.
 
 A world (world_sdf) adds a ground plane, a ceiling plane at the ceiling height
-(given, or a few millimetres above the highest ceiling marker), light from
+(given, but never below a few millimetres above the highest ceiling marker,
+which it would hide), light from
 below for markers that face down and from above for the floor, and the system
 plugins Gazebo Harmonic needs to simulate and render cameras (physics,
 sensors with ogre2, scene broadcaster, user commands).
@@ -147,8 +148,11 @@ def world_sdf(the_map: mm.MarkerMap, models: str, ceiling: Optional[float] = Non
     plugins. The models sit between the begin and end comment lines, so that
     --replace-between can update them later."""
     cx, cy, sx, sy = extent(the_map)
-    if ceiling is None:
-        ceiling = ceiling_height(the_map)
+    lowest = ceiling_height(the_map)
+    if ceiling is None or (lowest is not None and ceiling < lowest):
+        # A measured height is rounded and a surveyed height scatters by a few
+        # millimetres: a plane at or below a marker would hide it from below.
+        ceiling = lowest
     out = ['<?xml version="1.0"?>',
            '<sdf version="1.9">',
            f'  <world name="{escape(world_name)}">',

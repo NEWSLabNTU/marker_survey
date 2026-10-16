@@ -82,6 +82,15 @@ def test_ceiling_height_given(site, tmp_path):
     assert float(ceiling.find('pose').text.split()[2]) == pytest.approx(3.1)
 
 
+def test_ceiling_never_hides_a_marker(site, tmp_path):
+    # Measured 2.9 m, but marker 0 was surveyed at 2.9: the plane goes behind it.
+    out = tmp_path / 'site.world'
+    assert main([site, str(out), '--world', '--ceiling', '2.88']) == 0
+    world = ET.parse(out).getroot().find('world')
+    ceiling = next(m for m in world.findall('model') if m.get('name') == 'ceiling')
+    assert float(ceiling.find('pose').text.split()[2]) == pytest.approx(2.9 + sdf.STANDOFF)
+
+
 def test_models_only_and_replace_between(site, tmp_path):
     out = tmp_path / 'markers.sdf'
     assert main([site, str(out)]) == 0
